@@ -31,8 +31,9 @@ object Dependencies {
 
     val organizeImports = "0.6.0"
 
-    val dockerJava = "3.2.13"
-    val ip4s       = "3.1.3"
+    val dockerJava  = "3.2.13"
+    val ip4s        = "3.1.3"
+    val dreadnought = "0.1.0"
   }
 
   object Libraries {
@@ -103,6 +104,8 @@ object Dependencies {
       "com.github.docker-java" % "docker-java-transport-httpclient5" % V.dockerJava
 
     val ip4s = "com.comcast" %% "ip4s-core" % V.ip4s
+
+    val dreadnought = "uk.co.odinconsultants" %% "dreadnought-core" % V.dreadnought
 
   }
 
