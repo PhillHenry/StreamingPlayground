@@ -12,22 +12,24 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     client      <- CatsDocker.client
     sparkStart  <- Deferred[IO, String]
     spark       <- CatsDocker.interpret(client, startSpark(sparkStart))
-    (zk, kafka) <- ZKKafkaMain.waitForStack(client)
-    _           <- KafkaAntics
-                     .produceMessages(ip"127.0.0.1", port"9092")
-                     .handleErrorWith(x => Stream.eval(IO(x.printStackTrace())))
-                     .compile
-                     .drain
-    _           <- CatsDocker.interpret(client, ZKKafkaMain.tearDownFree(zk, kafka))
+//    (zk, kafka) <- ZKKafkaMain.waitForStack(client)
+//    _           <- KafkaAntics
+//                     .produceMessages(ip"127.0.0.1", port"9092")
+//                     .handleErrorWith(x => Stream.eval(IO(x.printStackTrace())))
+//                     .compile
+//                     .drain
+//    _           <- CatsDocker.interpret(client, ZKKafkaMain.tearDownFree(zk, kafka))
     _           <- CatsDocker.interpret(client, Free.liftF(StopRequest(spark)))
-  } yield println("Started and stopped")
+  } yield {
+    println("Started and stopped" + spark)
+  }
 
   def startSpark(sparkStart: Deferred[IO, String]): Free[ManagerRequest, ContainerId] =
     for {
       spark <- Free.liftF(
           StartRequest(
             ImageName("bde2020/spark-master:3.2.1-hadoop3.2"),
-            Command(""),
+            Command("/bin/bash /master.sh"),
             List("INIT_DAEMON_STEP=setup_spark"),
             List.empty,
             List.empty
