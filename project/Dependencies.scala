@@ -105,7 +105,10 @@ object Dependencies {
 
     val ip4s = "com.comcast" %% "ip4s-core" % V.ip4s
 
-    val dreadnought = "uk.co.odinconsultants" %% "dreadnought-core" % V.dreadnought
+    def dreadnought(artifact: String): ModuleID = "uk.co.odinconsultants" %% ("dreadnought-" + artifact) % V.dreadnought
+    val dreadnoughtCore = dreadnought("core")
+    val dreadnoughtDocker = dreadnought("docker")
+    val dreadnoughtExamples = dreadnought("examples")
 
   }
 
