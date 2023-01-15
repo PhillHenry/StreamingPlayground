@@ -33,7 +33,7 @@ object Dependencies {
 
     val dockerJava  = "3.2.13"
     val ip4s        = "3.1.3"
-    val dreadnought = "0.1.0"
+    val dreadnought = "0.1.1"
   }
 
   object Libraries {
