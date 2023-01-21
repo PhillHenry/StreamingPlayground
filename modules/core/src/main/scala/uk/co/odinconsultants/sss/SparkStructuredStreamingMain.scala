@@ -34,7 +34,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
 //    _          <- sparkStart.get
     masterName <- CatsDocker.interpret(client, Free.liftF(NamesRequest(spark)))
     slaveStart <- Deferred[IO, String]
-    slave      <- startSlave(slaveStart, port"7077", masterName.head, client)
+    slave      <- startSlave(slaveStart, port"7077", masterName, client)
 //    _          <- slaveStart.get
     _          <- CatsDocker.interpret(
                     client,
@@ -63,7 +63,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
   def startSlave(
       sparkStart:  Deferred[IO, String],
       servicePort: Port,
-      masterName:  String,
+      masterName:  List[String],
       client:      DockerClient,
   ): IO[ContainerId] = CatsDocker.interpret(client,
     for {
@@ -83,12 +83,12 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     List.empty,
   )
 
-  def sparkSlave(masterName: String, servicePort: Port): StartRequest = StartRequest(
+  def sparkSlave(masterName: List[String], servicePort: Port): StartRequest = StartRequest(
     ImageName("bde2020/spark-worker:3.2.1-hadoop3.2"),
     Command("/bin/bash /worker.sh"),
-    List(s"SPARK_MASTER=spark:/$masterName:${servicePort.value}"),
+    List(s"SPARK_MASTER=spark://spark-master:${servicePort.value}"),
     List.empty,
-    List.empty,
+    masterName.map(_ -> "spark-master"),
   )
 
 }
