@@ -6,12 +6,13 @@ import fs2.kafka.{ConsumerSettings, ProducerRecords, ProducerSettings, *}
 import fs2.{Chunk, Pipe, Pure, Stream}
 import uk.co.odinconsultants.dreadnought.docker.ZKKafkaMain.waitFor
 import uk.co.odinconsultants.dreadnought.docker.{CatsDocker, Command, ContainerId, ImageName, KafkaAntics, LoggingRequest, ManagerRequest, StartRequest, StopRequest, ZKKafkaMain}
+import com.comcast.ip4s.Port
 
 object SparkStructuredStreamingMain extends IOApp.Simple {
   def run: IO[Unit] = for {
     client      <- CatsDocker.client
     sparkStart  <- Deferred[IO, String]
-    spark       <- CatsDocker.interpret(client, startSpark(sparkStart))
+    spark       <- CatsDocker.interpret(client, startSpark(sparkStart, port"8081"))
 //    (zk, kafka) <- ZKKafkaMain.waitForStack(client)
 //    _           <- KafkaAntics
 //                     .produceMessages(ip"127.0.0.1", port"9092")
@@ -24,14 +25,15 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     println("Started and stopped" + spark)
   }
 
-  def startSpark(sparkStart: Deferred[IO, String]): Free[ManagerRequest, ContainerId] =
+  def startSpark(sparkStart: Deferred[IO, String],
+                 hostPort: Port): Free[ManagerRequest, ContainerId] =
     for {
       spark <- Free.liftF(
           StartRequest(
             ImageName("bde2020/spark-master:3.2.1-hadoop3.2"),
             Command("/bin/bash /master.sh"),
             List("INIT_DAEMON_STEP=setup_spark"),
-            List.empty,
+            List(8080 -> hostPort.value),
             List.empty
           )
         )
