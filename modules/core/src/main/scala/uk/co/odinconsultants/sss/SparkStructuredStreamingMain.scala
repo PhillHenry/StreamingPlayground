@@ -20,22 +20,22 @@ import uk.co.odinconsultants.dreadnought.docker.{
 }
 import com.comcast.ip4s.Port
 import com.github.dockerjava.api.DockerClient
+import scala.concurrent.duration.*
 
 object SparkStructuredStreamingMain extends IOApp.Simple {
 
   /** TODO
     * Pull images
-    * Timeouts
     */
   def run: IO[Unit] = for {
     client     <- CatsDocker.client
     sparkStart <- Deferred[IO, String]
     spark      <- startMaster(sparkStart, port"8081", port"7077", client)
-//    _          <- sparkStart.get
+    _          <- sparkStart.get//.timeout(10.seconds)
     masterName <- CatsDocker.interpret(client, Free.liftF(NamesRequest(spark)))
     slaveStart <- Deferred[IO, String]
     slave      <- startSlave(slaveStart, port"7077", masterName, client)
-//    _          <- slaveStart.get
+    _          <- slaveStart.get.timeout(10.seconds)
     _          <- CatsDocker.interpret(
                     client,
                     for {
@@ -70,7 +70,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       spark <- Free.liftF(sparkSlave(masterName, servicePort))
       _     <-
         Free.liftF(
-          LoggingRequest(spark, waitFor("Successfully started service 'sparkWorker'", sparkStart))
+          LoggingRequest(spark, waitFor("Successfully registered with master", sparkStart))
         )
     } yield spark
   )
