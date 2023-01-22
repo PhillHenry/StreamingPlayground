@@ -28,21 +28,24 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     * Pull images
     */
   def run: IO[Unit] = for {
-    client     <- CatsDocker.client
-    sparkStart <- Deferred[IO, String]
-    spark      <- startMaster(sparkStart, port"8081", port"7077", client)
-    _          <- sparkStart.get//.timeout(10.seconds)
-    masterName <- CatsDocker.interpret(client, Free.liftF(NamesRequest(spark)))
-    slaveStart <- Deferred[IO, String]
-    slave      <- startSlave(slaveStart, port"7077", masterName, client)
-    _          <- slaveStart.get.timeout(10.seconds)
-    _          <- CatsDocker.interpret(
-                    client,
-                    for {
-                      _ <- Free.liftF(StopRequest(spark))
-                      _ <- Free.liftF(StopRequest(slave))
-                    } yield {},
-                  )
+    client      <- CatsDocker.client
+    (zk, kafka) <- ZKKafkaMain.waitForStack(client)
+    sparkStart  <- Deferred[IO, String]
+    spark       <- startMaster(sparkStart, port"8081", port"7077", client)
+    _           <- sparkStart.get.timeout(10.seconds)
+    masterName  <- CatsDocker.interpret(client, Free.liftF(NamesRequest(spark)))
+    slaveStart  <- Deferred[IO, String]
+    slave       <- startSlave(slaveStart, port"7077", masterName, client)
+    _           <- slaveStart.get.timeout(10.seconds)
+    _           <- CatsDocker.interpret(
+                     client,
+                     for {
+                       _ <- Free.liftF(StopRequest(spark))
+                       _ <- Free.liftF(StopRequest(slave))
+                       _ <- Free.liftF(StopRequest(kafka))
+                       _ <- Free.liftF(StopRequest(zk))
+                     } yield {},
+                   )
   } yield println("Started and stopped" + spark)
 
   def startMaster(
@@ -50,14 +53,15 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       webPort:     Port,
       servicePort: Port,
       client:      DockerClient,
-  ): IO[ContainerId] = CatsDocker.interpret(client,
+  ): IO[ContainerId] = CatsDocker.interpret(
+    client,
     for {
       spark <- Free.liftF(sparkMaster(webPort, servicePort))
       _     <-
         Free.liftF(
           LoggingRequest(spark, waitFor("I have been elected leader! New state: ALIVE", sparkStart))
         )
-    } yield spark
+    } yield spark,
   )
 
   def startSlave(
@@ -65,14 +69,15 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       servicePort: Port,
       masterName:  List[String],
       client:      DockerClient,
-  ): IO[ContainerId] = CatsDocker.interpret(client,
+  ): IO[ContainerId] = CatsDocker.interpret(
+    client,
     for {
       spark <- Free.liftF(sparkSlave(masterName, servicePort))
       _     <-
         Free.liftF(
           LoggingRequest(spark, waitFor("Successfully registered with master", sparkStart))
         )
-    } yield spark
+    } yield spark,
   )
 
   def sparkMaster(webPort: Port, servicePort: Port): StartRequest = StartRequest(
