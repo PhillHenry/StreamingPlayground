@@ -34,6 +34,9 @@ object Dependencies {
     val dockerJava  = "3.2.13"
     val ip4s        = "3.1.3"
     val dreadnought = "0.1.2"
+
+    val spark = "3.3.1"
+
   }
 
   object Libraries {
@@ -105,10 +108,13 @@ object Dependencies {
 
     val ip4s = "com.comcast" %% "ip4s-core" % V.ip4s
 
-    def dreadnought(artifact: String): ModuleID = "uk.co.odinconsultants" %% ("dreadnought-" + artifact) % V.dreadnought
-    val dreadnoughtCore = dreadnought("core")
-    val dreadnoughtDocker = dreadnought("docker")
+    def dreadnought(artifact: String): ModuleID =
+      "uk.co.odinconsultants" %% ("dreadnought-" + artifact) % V.dreadnought
+    val dreadnoughtCore     = dreadnought("core")
+    val dreadnoughtDocker   = dreadnought("docker")
     val dreadnoughtExamples = dreadnought("examples")
+
+    val spark = ("org.apache.spark" %% "spark-sql" % "3.2.0" % "provided").cross(CrossVersion.for3Use2_13)
 
   }
 
