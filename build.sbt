@@ -20,6 +20,8 @@ val commonSettings = List(
   scalafmtOnCompile := false, // recommended in Scala 3
   testFrameworks += new TestFramework("weaver.framework.CatsEffect"),
   libraryDependencies ++= Seq(
+    Libraries.spark,
+    Libraries.sparkKafka,
     Libraries.cats,
     Libraries.testkit,
     Libraries.catsEffect,
@@ -30,8 +32,7 @@ val commonSettings = List(
     Libraries.dreadnoughtCore,
     Libraries.dreadnoughtDocker,
     Libraries.dreadnoughtExamples,
-    Libraries.spark,
-  ) //++ Seq(("com.fasterxml.jackson.core" % "jackson-core" % "2.10.3")) //.cross(CrossVersion.for3Use2_13)),
+  )
 )
 
 lazy val root = (project in file("."))

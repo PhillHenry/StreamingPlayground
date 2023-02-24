@@ -35,19 +35,24 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
   } yield println("Started and stopped" + spark)
 
   val sparkRead = IO {
-//    import org.apache.spark.sql.SparkSession
-//    implicit val decoder = org.apache.spark.sql.Encoders.STRING
-//    val spark = SparkSession.builder
-//      .appName("HelloWorld")
-//      .master("127.0.0.1:7077")
-//      .getOrCreate()
-//
-//    val df = spark.readStream
-//      .format("kafka")
-//      .option("kafka.bootstrap.servers", "127.0.0.1:9092")
-//      .option("subscribe", TOPIC_NAME)
-//      .load()
+    import org.apache.spark.sql.SparkSession
+    implicit val decoder = org.apache.spark.sql.Encoders.STRING
+    val spark = SparkSession.builder
+      .appName("HelloWorld")
+      .master("spark://127.0.0.1:7077")
+      .getOrCreate()
+
+    val df = spark.readStream
+      .format("kafka")
+      .option("kafka.bootstrap.servers", "127.0.0.1:9092")
+      .option("subscribe", TOPIC_NAME)
+      .option("startingOffsets", "earliest")
+      .option("startingOffsets",          "earliest")
+      .load()
 //    df.selectExpr("CAST(value AS STRING)").as[String].show(10)
+    val query2 = df.selectExpr("CAST(value AS STRING)").as[String].writeStream
+      .format("console")
+      .start()
   }
 
 }

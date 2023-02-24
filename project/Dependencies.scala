@@ -114,7 +114,9 @@ object Dependencies {
     val dreadnoughtDocker   = dreadnought("docker")
     val dreadnoughtExamples = dreadnought("examples")
 
-    val spark = ("org.apache.spark" %% "spark-sql" % "3.2.0" % "provided").cross(CrossVersion.for3Use2_13)
+    val spark      = ("org.apache.spark" %% "spark-sql" % "3.2.1").cross(CrossVersion.for3Use2_13)
+    val sparkKafka =
+      ("org.apache.spark" %% "spark-sql-kafka-0-10" % "3.2.1").cross(CrossVersion.for3Use2_13)
 
   }
 
