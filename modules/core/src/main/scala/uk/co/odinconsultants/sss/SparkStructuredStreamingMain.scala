@@ -40,9 +40,17 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     slave <- CatsDocker.interpret(
                client,
                for {
+                 // the problem with this is that the worker tries to make connections to the JVM running this.
+                 // You'll see this in the workers logs:
+                 // 23/06/29 08:45:06 WARN NettyRpcEnv: Ignored failure: java.io.IOException: Connecting to adele.lan/192.168.1.147:32851 timed out (120000 ms)
+                 // that port (32851) refers to this JVM. You can do this but you need to reconfigure the container.
+                 // See:
+                 // https://github.com/jenkinsci/docker-plugin/issues/893
+                 // https://docs.docker.com/network/drivers/bridge/
+                 // and withNetworkMode in com/github/dockerjava/api/model/HostConfig.java
                  spark <- Free.liftF(
                             StartRequest(
-                              ImageName("ph1ll1phenry/spark_worker_3_3_0_scala_2_13"),
+                              ImageName("ph1ll1phenry/spark_worker_3_3_0_scala_2_13_hadoop_3"),
                               Command("/bin/bash /worker.sh"),
                               List(s"SPARK_MASTER=spark://spark-master:7077"),
                               List.empty,
