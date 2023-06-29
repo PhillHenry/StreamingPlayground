@@ -4,11 +4,12 @@ import cats.effect.{Deferred, IO, IOApp}
 import cats.free.Free
 import com.comcast.ip4s.*
 import fs2.Stream
+import fs2.kafka.ProducerSettings
 import uk.co.odinconsultants.dreadnought.Flow.race
 import uk.co.odinconsultants.dreadnought.docker.*
 import uk.co.odinconsultants.dreadnought.docker.Algebra.toInterpret
 import uk.co.odinconsultants.dreadnought.docker.CatsDocker.interpret
-import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.produceMessages
+import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.{createCustomTopic, produceMessages}
 import uk.co.odinconsultants.dreadnought.docker.Logging.verboseWaitFor
 import uk.co.odinconsultants.dreadnought.docker.PopularContainers.startKafkaOnPort
 import uk.co.odinconsultants.dreadnought.docker.SparkStructuredStreamingMain.{startSlave, startSparkCluster, waitForMaster}
@@ -43,10 +44,17 @@ object KafkaDemoMain extends IOApp.Simple {
                     )
   } yield println("Started and stopped ZK and 2 kafka brokers")
 
-  private val sendMessages =
-    produceMessages(ip"127.0.0.1", kafkaPort, TOPIC_NAME)
+  private val sendMessages: IO[Unit] = {
+    val bootstrapServer                                        = s"localhost:${kafkaPort.value}"
+    val producerSettings: ProducerSettings[IO, String, String] =
+      ProducerSettings[IO, String, String]
+        .withBootstrapServers(bootstrapServer)
+    val messages                                               = KafkaAntics
+      .produce(producerSettings, TOPIC_NAME)
       .handleErrorWith(x => Stream.eval(IO(x.printStackTrace())))
       .compile
       .drain
+    IO(createCustomTopic(TOPIC_NAME)) *> messages
+  }
 
 }
