@@ -33,7 +33,7 @@ object Dependencies {
 
     val dockerJava  = "3.2.13"
     val ip4s        = "3.1.3"
-    val dreadnought = "0.1.3"
+    val dreadnought = "0.1.6"
 
     val spark = "3.3.1"
 

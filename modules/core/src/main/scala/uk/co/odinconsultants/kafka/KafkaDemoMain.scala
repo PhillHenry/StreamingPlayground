@@ -2,7 +2,7 @@ package uk.co.odinconsultants.kafka
 
 import cats.effect.{Deferred, IO, IOApp}
 import cats.free.Free
-import com.comcast.ip4s.*
+import com.comcast.ip4s.{port, *}
 import fs2.Stream
 import fs2.kafka.ProducerSettings
 import uk.co.odinconsultants.dreadnought.Flow.race
@@ -15,6 +15,7 @@ import uk.co.odinconsultants.dreadnought.docker.PopularContainers.startKafkaOnPo
 import uk.co.odinconsultants.dreadnought.docker.SparkStructuredStreamingMain.{startSlave, startSparkCluster, waitForMaster}
 import uk.co.odinconsultants.dreadnought.docker.ZKKafkaMain.{kafkaEcosystem, startKafkaCluster}
 
+import java.util.UUID
 import scala.concurrent.duration.*
 
 object KafkaDemoMain extends IOApp.Simple {
@@ -29,14 +30,17 @@ object KafkaDemoMain extends IOApp.Simple {
     */
   def run: IO[Unit] = for {
     client       <- CatsDocker.client
-    (zk, kafka1) <- startKafkaCluster(client, verboseWaitFor, 20.seconds)
+    (zk, kafka1) <- startKafkaCluster(client, verboseWaitFor(Some(s"${Console.RED}SparkMaster: ")), 20.seconds)
     zkName       <- CatsDocker.interpret(client, Free.liftF(NamesRequest(zk)))
     kafkaStart   <- Deferred[IO, String]
-    kafkaLatch    = verboseWaitFor("started (kafka.server.Kafka", kafkaStart)
+    kafkaLatch    = verboseWaitFor(Some(s"${Console.BLUE}Kafka: "))("started (kafka.server.Kafka", kafkaStart)
     kafka2       <- interpret(client, Free.liftF(startKafkaOnPort(kafkaPort, zkName)))
-    _            <- interpret(client, Free.liftF(
-                      LoggingRequest(kafka2, kafkaLatch)
-                    ))
+    _            <- interpret(
+                      client,
+                      Free.liftF(
+                        LoggingRequest(kafka2, kafkaLatch)
+                      ),
+                    )
     _            <- kafkaStart.get.timeout(20.seconds)
     _            <- sendMessages
     _            <- race(toInterpret(client))(
@@ -54,7 +58,7 @@ object KafkaDemoMain extends IOApp.Simple {
       .handleErrorWith(x => Stream.eval(IO(x.printStackTrace())))
       .compile
       .drain
-    IO(createCustomTopic(TOPIC_NAME)) *> messages
+    IO(createCustomTopic(TOPIC_NAME, port"9091")) *> messages
   }
 
 }
