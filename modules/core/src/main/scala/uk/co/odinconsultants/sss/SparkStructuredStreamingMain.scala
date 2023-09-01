@@ -7,9 +7,9 @@ import uk.co.odinconsultants.dreadnought.Flow.race
 import uk.co.odinconsultants.dreadnought.docker.Algebra.toInterpret
 import uk.co.odinconsultants.dreadnought.docker.Logging.{ioPrintln, verboseWaitFor}
 import uk.co.odinconsultants.dreadnought.docker.*
-import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.produceMessages
 import com.comcast.ip4s.*
 import com.github.dockerjava.api.DockerClient
+import fs2.kafka.ProducerSettings
 import uk.co.odinconsultants.dreadnought.docker.CatsDocker.{createNetwork, interpret, removeNetwork}
 import uk.co.odinconsultants.dreadnought.docker.KafkaRaft
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, verboseWaitFor}
@@ -24,6 +24,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
   val networkName                  = "my_network"
   val SPARK_MASTER                 = "spark-master"
   val OUTSIDE_KAFKA_BOOTSTRAP_PORT = port"9111"
+  val SPARK_DRIVER_PORT            = 10027 // you'll need to open your firewall to this port
 
   def toNetworkName(x: String): String = x.replace("/", "")
 
@@ -78,7 +79,10 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
                                      StartRequest(
                                        ImageName("ph1ll1phenry/spark_worker_3_3_0_scala_2_13_hadoop_3"),
                                        Command("/bin/bash /worker.sh"),
-                                       List(s"SPARK_MASTER=spark://${spark.toString.substring(0, 12)}:7077"),
+                                       List(
+                                         s"SPARK_MASTER=spark://${spark.toString.substring(0, 12)}:7077",
+                                         s"SPARK_WORKER_OPTS=\"-Dspark.driver.host=172.17.0.1 -Dspark.driver.port=$SPARK_DRIVER_PORT\"",
+                                       ),
                                        List.empty,
                                        List(s"$spark" -> SPARK_MASTER, "kafka1" -> BOOTSTRAP),
                                        networkName = Some(networkName),
@@ -91,19 +95,31 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
                         } yield spark,
                       )
     _              <- slaveLatch.get.timeout(20.seconds)
+    _              <- IO.println("About to send messages")
     _              <- sendMessages
+    _              <- IO.println("About to read messages")
     _              <- sparkRead
+    _              <- IO.println("About to send some more messages")
     _              <- sendMessages
+    _              <- IO.println("About to close down. Press return to end")
+    _              <- IO.readLine
     _              <- race(toInterpret(client))(
                         (List(spark, slave) ++ kafkas).map(StopRequest.apply)
                       )
   } yield println("Started and stopped" + spark)
 
-  private val sendMessages =
-    produceMessages(ip"127.0.0.1", OUTSIDE_KAFKA_BOOTSTRAP_PORT, TOPIC_NAME)
+  private val sendMessages: IO[Unit] = {
+    val bootstrapServer                                        = s"localhost:${OUTSIDE_KAFKA_BOOTSTRAP_PORT}"
+    val producerSettings: ProducerSettings[IO, String, String] =
+      ProducerSettings[IO, String, String]
+        .withBootstrapServers(bootstrapServer)
+    val messages                                               = KafkaAntics
+      .produce(producerSettings, TOPIC_NAME)
       .handleErrorWith(x => Stream.eval(IO(x.printStackTrace())))
       .compile
       .drain
+    messages
+  }
 
   val sparkRead = IO {
     import org.apache.spark.sql.SparkSession
@@ -111,6 +127,8 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     val spark = SparkSession.builder
       .appName("HelloWorld")
       .master("spark://127.0.0.1:7077")
+      .config("spark.driver.host", "172.17.0.1")
+      .config("spark.driver.port", SPARK_DRIVER_PORT)
       .getOrCreate()
 
     implicit val decoder = org.apache.spark.sql.Encoders.STRING
@@ -124,7 +142,6 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       .option("startingOffsets", "earliest")
       .option("startingOffsets", "earliest")
       .load()
-//    df.selectExpr("CAST(value AS STRING)").as[String].show(10)
     val query2           = df
       .selectExpr("CAST(value AS STRING)")
       .as[String]
