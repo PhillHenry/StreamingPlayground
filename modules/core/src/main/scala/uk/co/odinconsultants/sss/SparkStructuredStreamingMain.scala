@@ -19,10 +19,11 @@ import scala.concurrent.duration.*
 
 object SparkStructuredStreamingMain extends IOApp.Simple {
 
-  val TOPIC_NAME   = "test_topic"
-  val BOOTSTRAP    = "kafka1"
-  val networkName  = "my_network"
-  val SPARK_MASTER = "spark-master"
+  val TOPIC_NAME                   = "test_topic"
+  val BOOTSTRAP                    = "kafka1"
+  val networkName                  = "my_network"
+  val SPARK_MASTER                 = "spark-master"
+  val OUTSIDE_KAFKA_BOOTSTRAP_PORT = port"9111"
 
   def toNetworkName(x: String): String = x.replace("/", "")
 
@@ -99,7 +100,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
   } yield println("Started and stopped" + spark)
 
   private val sendMessages =
-    produceMessages(ip"127.0.0.1", port"9092", TOPIC_NAME)
+    produceMessages(ip"127.0.0.1", OUTSIDE_KAFKA_BOOTSTRAP_PORT, TOPIC_NAME)
       .handleErrorWith(x => Stream.eval(IO(x.printStackTrace())))
       .compile
       .drain
@@ -115,7 +116,10 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     implicit val decoder = org.apache.spark.sql.Encoders.STRING
     val df               = spark.readStream
       .format("kafka")
-      .option("kafka.bootstrap.servers", s"127.0.0.1:9091,$BOOTSTRAP:9091")
+      .option(
+        "kafka.bootstrap.servers",
+        s"127.0.0.1:$OUTSIDE_KAFKA_BOOTSTRAP_PORT,$BOOTSTRAP:$OUTSIDE_KAFKA_BOOTSTRAP_PORT",
+      )
       .option("subscribe", "test_topic")
       .option("startingOffsets", "earliest")
       .option("startingOffsets", "earliest")
