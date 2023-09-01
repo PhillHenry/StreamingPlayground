@@ -11,9 +11,9 @@ import com.comcast.ip4s.*
 import com.github.dockerjava.api.DockerClient
 import fs2.kafka.ProducerSettings
 import uk.co.odinconsultants.dreadnought.docker.CatsDocker.{createNetwork, interpret, removeNetwork}
+import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
 import uk.co.odinconsultants.dreadnought.docker.KafkaRaft
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, verboseWaitFor}
-
 import scala.collection.immutable.List
 import scala.concurrent.duration.*
 
@@ -23,8 +23,8 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
   val BOOTSTRAP                    = "kafka1"
   val networkName                  = "my_network"
   val SPARK_MASTER                 = "spark-master"
-  val OUTSIDE_KAFKA_BOOTSTRAP_PORT = port"9111"
-  val SPARK_DRIVER_PORT            = 10027 // you'll need to open your firewall to this port
+  val OUTSIDE_KAFKA_BOOTSTRAP_PORT = port"9111" // hard coded - not good
+  val SPARK_DRIVER_PORT            = 10027      // you'll need to open your firewall to this port
 
   def toNetworkName(x: String): String = x.replace("/", "")
 
@@ -50,6 +50,9 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
         client,
         KafkaRaft.startKafkas(loggers, networkName),
       )
+    _              <- kafkaStart.get.timeout(20.seconds)
+    _              <- IO.println(s"About to create topic $TOPIC_NAME")
+    _              <- IO(createCustomTopic(TOPIC_NAME, OUTSIDE_KAFKA_BOOTSTRAP_PORT))
     spark          <-
       waitForMaster(client, verboseWaitFor(Some(s"${Console.MAGENTA}SparkMaster: ")), 30.seconds)
     masterName     <- CatsDocker.interpret(client, Free.liftF(NamesRequest(spark)))
