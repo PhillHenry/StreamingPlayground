@@ -20,7 +20,7 @@ object SparkMain extends IOApp.Simple {
     * Pull images
     */
   def run: IO[Unit] = for {
-    _              <- sparkRead
+    _              <- sparkRead("TODO")
   } yield println("Connected to Spark")
 
 }

@@ -10,10 +10,14 @@ import uk.co.odinconsultants.dreadnought.docker.*
 import com.comcast.ip4s.*
 import com.github.dockerjava.api.DockerClient
 import fs2.kafka.ProducerSettings
+import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.streaming.StreamingQuery
 import uk.co.odinconsultants.dreadnought.docker.CatsDocker.{createNetwork, interpret, removeNetwork}
 import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
 import uk.co.odinconsultants.dreadnought.docker.KafkaRaft
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, verboseWaitFor}
+import uk.co.odinconsultants.S3Utils
+
 import scala.collection.immutable.List
 import scala.concurrent.duration.*
 
@@ -25,18 +29,47 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
   val SPARK_MASTER                 = "spark-master"
   val OUTSIDE_KAFKA_BOOTSTRAP_PORT = port"9111" // hard coded - not good
   val SPARK_DRIVER_PORT            = 10027      // you'll need to open your firewall to this port
+  val MINIO_ROOT_USER              = "minio-root-user"
+  val MINIO_ROOT_PASSWORD          = "minio-root-password"
+  val MINIO_SERVER_SECRET_KEY      = "minio-secret-key"
+  val MINIO_SERVER_ACCESS_KEY      = "minio-access-key"
 
   def toNetworkName(x: String): String = x.replace("/", "")
+
+  def toEndpoint(x: ContainerId): String = toEndpointName(x.toString)
+
+  def toEndpointName(x: String): String = x.substring(0, 12)
 
   /** TODO
     * Pull images
     */
   def run: IO[Unit] = for {
-    client         <- CatsDocker.client
-    _              <- removeNetwork(client, networkName).handleErrorWith(x =>
-                        IO.println(s"Did not delete network $networkName.\n${x.getMessage}")
-                      )
-    _              <- createNetwork(client, networkName)
+    client <- CatsDocker.client
+    _      <- removeNetwork(client, networkName).handleErrorWith(x =>
+                IO.println(s"Did not delete network $networkName.\n${x.getMessage}")
+              )
+    _      <- createNetwork(client, networkName)
+
+    minio     <- CatsDocker.interpret(
+                   client,
+                   for {
+                     minio <- Free.liftF(
+                                StartRequest(
+                                  ImageName("bitnami/minio:latest"),
+                                  Command("/opt/bitnami/scripts/minio/run.sh"),
+                                  List(
+                                    s"MINIO_ROOT_USER=$MINIO_ROOT_USER",
+                                    s"MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD",
+                                  ),
+                                  List.empty,
+                                  List.empty,
+                                  networkName = Some(networkName),
+                                )
+                              )
+                   } yield minio,
+                 )
+    minioName <- interpret(client, Free.liftF(NamesRequest(minio)))
+
     kafkaStart     <- Deferred[IO, String]
     kafkaLatch      =
       verboseWaitFor(Some(s"${Console.BLUE}kafka1: "))("started (kafka.server.Kafka", kafkaStart)
@@ -83,7 +116,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
                                        ImageName("ph1ll1phenry/spark_worker_3_3_0_scala_2_13_hadoop_3"),
                                        Command("/bin/bash /worker.sh"),
                                        List(
-                                         s"SPARK_MASTER=spark://${spark.toString.substring(0, 12)}:7077",
+                                         s"SPARK_MASTER=spark://${toEndpoint(spark)}:7077",
                                          s"SPARK_WORKER_OPTS=\"-Dspark.driver.host=172.17.0.1 -Dspark.driver.port=$SPARK_DRIVER_PORT\"",
                                        ),
                                        List.empty,
@@ -101,7 +134,8 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     _              <- IO.println("About to send messages")
     _              <- sendMessages
     _              <- IO.println("About to read messages")
-    _              <- sparkRead
+    (query, df)    <- sparkRead(toEndpointName(minioName.head))
+    _              <- IO.sleep(10.seconds)
     _              <- IO.println("About to send some more messages")
     _              <- sendMessages
     _              <- IO.println("About to close down. Press return to end")
@@ -124,15 +158,21 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     messages
   }
 
-  val sparkRead = IO {
+  def sparkRead(endpoint: String): IO[(StreamingQuery, DataFrame)] = IO {
     import org.apache.spark.sql.SparkSession
+    import org.apache.spark.sql.streaming.{DataStreamWriter, OutputMode, Trigger}
 
-    val spark = SparkSession.builder
-      .appName("HelloWorld")
-      .master("spark://127.0.0.1:7077")
-      .config("spark.driver.host", "172.17.0.1")
-      .config("spark.driver.port", SPARK_DRIVER_PORT)
-      .getOrCreate()
+    val spark: SparkSession = S3Utils.load_config(
+      SparkSession.builder
+        .appName("HelloWorld")
+        .master("spark://127.0.0.1:7077")
+        .config("spark.driver.host", "172.17.0.1")
+        .config("spark.driver.port", SPARK_DRIVER_PORT)
+        .getOrCreate(),
+      MINIO_SERVER_ACCESS_KEY,
+      MINIO_SERVER_SECRET_KEY,
+      endpoint,
+    )
 
     implicit val decoder = org.apache.spark.sql.Encoders.STRING
     val df               = spark.readStream
@@ -141,17 +181,25 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
         "kafka.bootstrap.servers",
         s"127.0.0.1:$OUTSIDE_KAFKA_BOOTSTRAP_PORT,$BOOTSTRAP:$OUTSIDE_KAFKA_BOOTSTRAP_PORT",
       )
-      .option("subscribe", "test_topic")
-      .option("startingOffsets", "earliest")
+      .option("subscribe", TOPIC_NAME)
+      .option("offset", "earliest")
       .option("startingOffsets", "earliest")
       .load()
     val query2           = df
       .selectExpr("CAST(value AS STRING)")
       .as[String]
+      .flatMap { case (x) =>
+        println(s"x = $x")
+        Some(x)
+      }
       .writeStream
       .format("console")
+      .outputMode(OutputMode.Append())
+      .option("truncate", "false")
+      .queryName("console")
       .start()
-    query2.awaitTermination(10000)
+    query2.awaitTermination(20000)
+    (query2, df)
   }
 
   def waitForMaster(
