@@ -66,7 +66,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
                                   List(9000 -> 9000),
                                   List.empty,
                                   networkName = Some(networkName),
-//                                  volumes = List(("/tmp/minio", "/bitnami/minio/data")),
+                                  volumes = List(("//tmp/minio_test", "/bitnami/minio/data")),
                                 )
                               )
                    } yield minio,
@@ -138,7 +138,10 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     _              <- sendMessages
     _              <- IO.println("About to read messages")
     endpoint        = "http://localhost:9000/"
-    _              <- makeMinioBucket(endpoint)
+    _              <- makeMinioBucket(endpoint).handleErrorWith { (x: Throwable) =>
+      IO { x.printStackTrace() } *> IO.println("Could not create bucket but that's OK if it's already been created")
+    }
+
     (query, df)    <- sparkRead(endpoint)
     _              <- IO.sleep(10.seconds)
     _              <- IO.println("About to send some more messages")
@@ -194,7 +197,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     val spark = sparkS3Session(endpoint)
 
     implicit val decoder = org.apache.spark.sql.Encoders.STRING
-    val df     = spark.readStream
+    val df               = spark.readStream
       .format("kafka")
       .option(
         "kafka.bootstrap.servers",
@@ -204,8 +207,8 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       .option("offset", "earliest")
       .option("startingOffsets", "earliest")
       .load()
-    val path  = s"s3a://$BUCKET_NAME/test"
-    val query2 = df
+    val path             = s"s3a://$BUCKET_NAME/test"
+    val query2           = df
       .selectExpr("CAST(value AS STRING)")
       .as[String]
       .flatMap { case (x) =>

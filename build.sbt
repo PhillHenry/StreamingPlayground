@@ -21,8 +21,6 @@ val commonSettings = List(
   testFrameworks += new TestFramework("weaver.framework.CatsEffect"),
   libraryDependencies ++= Seq(
     Libraries.spark,
-    Libraries.hadoopAws,
-    Libraries.minio,
     Libraries.sparkKafka,
     Libraries.cats,
     Libraries.testkit,
@@ -34,8 +32,13 @@ val commonSettings = List(
     Libraries.dreadnoughtCore,
     Libraries.dreadnoughtDocker,
     Libraries.dreadnoughtExamples,
+    Libraries.hadoopAws,
+    Libraries.minio,
   )
 )
+
+dependencyOverrides += "com.fasterxml.jackson.core" % "jackson-databind" % "2.12.3"
+dependencyOverrides += "com.fasterxml.jackson.core" % "jackson-core" % "2.12.3"
 
 lazy val root = (project in file("."))
   .settings(
