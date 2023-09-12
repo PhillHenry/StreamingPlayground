@@ -37,6 +37,7 @@ object Dependencies {
 
     val spark     = "3.3.1"
     val hadoopAws = "3.3.1"
+    val minio     = "8.5.5"
   }
 
   object Libraries {
@@ -118,6 +119,7 @@ object Dependencies {
     val sparkKafka =
       ("org.apache.spark" %% "spark-sql-kafka-0-10" % "3.2.1").cross(CrossVersion.for3Use2_13)
     val hadoopAws = "org.apache.hadoop" % "hadoop-aws" % V.hadoopAws
+    val minio     = "io.minio"          % "minio" % V.minio
 
   }
 

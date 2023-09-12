@@ -22,6 +22,7 @@ val commonSettings = List(
   libraryDependencies ++= Seq(
     Libraries.spark,
     Libraries.hadoopAws,
+    Libraries.minio,
     Libraries.sparkKafka,
     Libraries.cats,
     Libraries.testkit,

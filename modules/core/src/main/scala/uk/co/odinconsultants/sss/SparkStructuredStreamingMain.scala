@@ -17,6 +17,7 @@ import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
 import uk.co.odinconsultants.dreadnought.docker.KafkaRaft
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, verboseWaitFor}
 import uk.co.odinconsultants.S3Utils
+import io.minio.{MakeBucketArgs, MinioClient}
 
 import scala.collection.immutable.List
 import scala.concurrent.duration.*
@@ -33,6 +34,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
   val MINIO_ROOT_PASSWORD          = "minio-root-password"
   val MINIO_SERVER_SECRET_KEY      = "minio-secret-key"
   val MINIO_SERVER_ACCESS_KEY      = "minio-access-key"
+  val BUCKET_NAME                  = "mybucket"
 
   def toNetworkName(x: String): String = x.replace("/", "")
 
@@ -61,7 +63,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
                                     s"MINIO_ROOT_USER=$MINIO_ROOT_USER",
                                     s"MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD",
                                   ),
-                                  List.empty,
+                                  List(9000 -> 9000),
                                   List.empty,
                                   networkName = Some(networkName),
 //                                  volumes = List(("/tmp/minio", "/bitnami/minio/data")),
@@ -135,7 +137,9 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     _              <- IO.println("About to send messages")
     _              <- sendMessages
     _              <- IO.println("About to read messages")
-    (query, df)    <- sparkRead(s"http://${toEndpointName(minioName.head)}:9000")
+    endpoint        = "http://localhost:9000/"
+    _              <- makeMinioBucket(endpoint)
+    (query, df)    <- sparkRead(endpoint)
     _              <- IO.sleep(10.seconds)
     _              <- IO.println("About to send some more messages")
     _              <- sendMessages
@@ -145,6 +149,17 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
                         (List(spark, slave, minio) ++ kafkas).map(StopRequest.apply)
                       )
   } yield println("Started and stopped" + spark)
+
+  private def toMinioEndpoint(minioName: List[String]) =
+    s"http://${toEndpointName(minioName.head)}:9000"
+
+  private def makeMinioBucket(endpoint: String) = IO {
+    val minioClient = MinioClient.builder
+      .endpoint(endpoint)
+      .credentials(MINIO_ROOT_USER, MINIO_ROOT_PASSWORD)
+      .build
+    minioClient.makeBucket(MakeBucketArgs.builder().bucket(BUCKET_NAME).build())
+  }
 
   private val sendMessages: IO[Unit] = {
     val bootstrapServer                                        = s"localhost:${OUTSIDE_KAFKA_BOOTSTRAP_PORT}"
@@ -167,8 +182,8 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
         .config("spark.driver.host", "172.17.0.1")
         .config("spark.driver.port", SPARK_DRIVER_PORT)
         .getOrCreate(),
-      MINIO_SERVER_ACCESS_KEY,
-      MINIO_SERVER_SECRET_KEY,
+      MINIO_ROOT_USER,
+      MINIO_ROOT_PASSWORD,
       endpoint,
     )
 
@@ -179,7 +194,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     val spark = sparkS3Session(endpoint)
 
     implicit val decoder = org.apache.spark.sql.Encoders.STRING
-    val df               = spark.readStream
+    val df     = spark.readStream
       .format("kafka")
       .option(
         "kafka.bootstrap.servers",
@@ -189,7 +204,8 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       .option("offset", "earliest")
       .option("startingOffsets", "earliest")
       .load()
-    val query2           = df
+    val path  = s"s3a://$BUCKET_NAME/test"
+    val query2 = df
       .selectExpr("CAST(value AS STRING)")
       .as[String]
       .flatMap { case (x) =>
@@ -200,7 +216,8 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       .format("parquet")
       .outputMode(OutputMode.Append())
       .option("truncate", "false")
-      .option("path", s"s3a://$TOPIC_NAME/test")
+      .option("path", path)
+      .option("checkpointLocation", path + "checkpoint")
       .trigger(Trigger.ProcessingTime(10000))
       .queryName("console")
       .start()
