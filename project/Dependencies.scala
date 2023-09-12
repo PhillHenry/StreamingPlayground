@@ -33,10 +33,10 @@ object Dependencies {
 
     val dockerJava  = "3.2.13"
     val ip4s        = "3.1.3"
-    val dreadnought = "0.1.6"
+    val dreadnought = "0.1.9"
 
-    val spark = "3.3.1"
-
+    val spark     = "3.3.1"
+    val hadoopAws = "3.3.1"
   }
 
   object Libraries {
@@ -117,6 +117,7 @@ object Dependencies {
     val spark      = ("org.apache.spark" %% "spark-sql" % "3.2.1").cross(CrossVersion.for3Use2_13)
     val sparkKafka =
       ("org.apache.spark" %% "spark-sql-kafka-0-10" % "3.2.1").cross(CrossVersion.for3Use2_13)
+    val hadoopAws = "org.apache.hadoop" % "hadoop-aws" % V.hadoopAws
 
   }
 

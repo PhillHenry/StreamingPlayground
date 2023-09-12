@@ -10,7 +10,7 @@ import uk.co.odinconsultants.dreadnought.docker.*
 import com.comcast.ip4s.*
 import com.github.dockerjava.api.DockerClient
 import fs2.kafka.ProducerSettings
-import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.streaming.StreamingQuery
 import uk.co.odinconsultants.dreadnought.docker.CatsDocker.{createNetwork, interpret, removeNetwork}
 import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
@@ -64,6 +64,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
                                   List.empty,
                                   List.empty,
                                   networkName = Some(networkName),
+//                                  volumes = List(("/tmp/minio", "/bitnami/minio/data")),
                                 )
                               )
                    } yield minio,
@@ -134,14 +135,14 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     _              <- IO.println("About to send messages")
     _              <- sendMessages
     _              <- IO.println("About to read messages")
-    (query, df)    <- sparkRead(toEndpointName(minioName.head))
+    (query, df)    <- sparkRead(s"http://${toEndpointName(minioName.head)}:9000")
     _              <- IO.sleep(10.seconds)
     _              <- IO.println("About to send some more messages")
     _              <- sendMessages
     _              <- IO.println("About to close down. Press return to end")
     _              <- IO.readLine
     _              <- race(toInterpret(client))(
-                        (List(spark, slave) ++ kafkas).map(StopRequest.apply)
+                        (List(spark, slave, minio) ++ kafkas).map(StopRequest.apply)
                       )
   } yield println("Started and stopped" + spark)
 
@@ -158,11 +159,8 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     messages
   }
 
-  def sparkRead(endpoint: String): IO[(StreamingQuery, DataFrame)] = IO {
-    import org.apache.spark.sql.SparkSession
-    import org.apache.spark.sql.streaming.{DataStreamWriter, OutputMode, Trigger}
-
-    val spark: SparkSession = S3Utils.load_config(
+  def sparkS3Session(endpoint: String): SparkSession =
+    S3Utils.load_config(
       SparkSession.builder
         .appName("HelloWorld")
         .master("spark://127.0.0.1:7077")
@@ -173,6 +171,12 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       MINIO_SERVER_SECRET_KEY,
       endpoint,
     )
+
+  def sparkRead(endpoint: String): IO[(StreamingQuery, DataFrame)] = IO {
+    import org.apache.spark.sql.SparkSession
+    import org.apache.spark.sql.streaming.{DataStreamWriter, OutputMode, Trigger}
+
+    val spark = sparkS3Session(endpoint)
 
     implicit val decoder = org.apache.spark.sql.Encoders.STRING
     val df               = spark.readStream
@@ -193,9 +197,11 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
         Some(x)
       }
       .writeStream
-      .format("console")
+      .format("parquet")
       .outputMode(OutputMode.Append())
       .option("truncate", "false")
+      .option("path", s"s3a://$TOPIC_NAME/test")
+      .trigger(Trigger.ProcessingTime(10000))
       .queryName("console")
       .start()
     query2.awaitTermination(20000)

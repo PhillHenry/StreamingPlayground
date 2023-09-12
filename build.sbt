@@ -21,6 +21,7 @@ val commonSettings = List(
   testFrameworks += new TestFramework("weaver.framework.CatsEffect"),
   libraryDependencies ++= Seq(
     Libraries.spark,
+    Libraries.hadoopAws,
     Libraries.sparkKafka,
     Libraries.cats,
     Libraries.testkit,
