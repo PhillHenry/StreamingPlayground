@@ -18,6 +18,8 @@ import uk.co.odinconsultants.dreadnought.docker.KafkaRaft
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, verboseWaitFor}
 import uk.co.odinconsultants.S3Utils
 import io.minio.{MakeBucketArgs, MinioClient}
+import uk.co.odinconsultants.S3Utils.{BUCKET_NAME, MINIO_ROOT_PASSWORD, MINIO_ROOT_USER, load_config, makeMinioBucket, startMinio}
+import uk.co.odinconsultants.SparkUtils.{BOOTSTRAP, SPARK_MASTER, startSparkWorker, SPARK_DRIVER_PORT, waitForMaster, sparkS3Session}
 
 import scala.collection.immutable.List
 import scala.concurrent.duration.*
@@ -25,16 +27,8 @@ import scala.concurrent.duration.*
 object SparkStructuredStreamingMain extends IOApp.Simple {
 
   val TOPIC_NAME                   = "test_topic"
-  val BOOTSTRAP                    = "kafka1"
   val networkName                  = "my_network"
-  val SPARK_MASTER                 = "spark-master"
   val OUTSIDE_KAFKA_BOOTSTRAP_PORT = port"9111" // hard coded - not good
-  val SPARK_DRIVER_PORT            = 10027      // you'll need to open your firewall to this port
-  val MINIO_ROOT_USER              = "minio-root-user"
-  val MINIO_ROOT_PASSWORD          = "minio-root-password"
-  val MINIO_SERVER_SECRET_KEY      = "minio-secret-key"
-  val MINIO_SERVER_ACCESS_KEY      = "minio-access-key"
-  val BUCKET_NAME                  = "mybucket"
 
   def toNetworkName(x: String): String = x.replace("/", "")
 
@@ -52,27 +46,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
               )
     _      <- createNetwork(client, networkName)
 
-    minio     <- CatsDocker.interpret(
-                   client,
-                   for {
-                     minio <- Free.liftF(
-                                StartRequest(
-                                  ImageName("bitnami/minio:latest"),
-                                  Command("/opt/bitnami/scripts/minio/run.sh"),
-                                  List(
-                                    s"MINIO_ROOT_USER=$MINIO_ROOT_USER",
-                                    s"MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD",
-                                  ),
-                                  List(9000 -> 9000),
-                                  List.empty,
-                                  networkName = Some(networkName),
-                                  volumes = List(("//tmp/minio_test", "/bitnami/minio/data")),
-                                )
-                              )
-                   } yield minio,
-                 )
-    minioName <- interpret(client, Free.liftF(NamesRequest(minio)))
-
+    minio          <- startMinio(client, networkName)
     kafkaStart     <- Deferred[IO, String]
     kafkaLatch      =
       verboseWaitFor(Some(s"${Console.BLUE}kafka1: "))("started (kafka.server.Kafka", kafkaStart)
@@ -90,7 +64,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     _              <- IO.println(s"About to create topic $TOPIC_NAME")
     _              <- IO(createCustomTopic(TOPIC_NAME, OUTSIDE_KAFKA_BOOTSTRAP_PORT))
     spark          <-
-      waitForMaster(client, verboseWaitFor(Some(s"${Console.MAGENTA}SparkMaster: ")), 30.seconds)
+      waitForMaster(client, verboseWaitFor(Some(s"${Console.MAGENTA}SparkMaster: ")), 30.seconds, networkName)
     masterName     <- CatsDocker.interpret(client, Free.liftF(NamesRequest(spark)))
     slaveLatch     <- Deferred[IO, String]
     slaveWait       = verboseWaitFor(Some(s"${Console.RED}SparkSlave: "))(
@@ -103,45 +77,18 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
         (x: String) => toNetworkName(x) -> BOOTSTRAP
       )
     _              <- IO.println(s"About to start slave with bootstrap mappings to $mappings...")
-    slave          <- CatsDocker.interpret(
-                        client,
-                        for {
-                          // the problem with this is that the worker tries to make connections to the JVM running this.
-                          // You'll see this in the workers logs:
-                          // 23/06/29 08:45:06 WARN NettyRpcEnv: Ignored failure: java.io.IOException: Connecting to adele.lan/192.168.1.147:32851 timed out (120000 ms)
-                          // that port (32851) refers to this JVM. You can do this but you need to reconfigure the container.
-                          // See:
-                          // https://github.com/jenkinsci/docker-plugin/issues/893
-                          // https://docs.docker.com/network/drivers/bridge/
-                          // and withNetworkMode in com/github/dockerjava/api/model/HostConfig.java
-                          spark <- Free.liftF(
-                                     StartRequest(
-                                       ImageName("ph1ll1phenry/spark_worker_3_3_0_scala_2_13_hadoop_3"),
-                                       Command("/bin/bash /worker.sh"),
-                                       List(
-                                         s"SPARK_MASTER=spark://${toEndpoint(spark)}:7077",
-                                         s"SPARK_WORKER_OPTS=\"-Dspark.driver.host=172.17.0.1 -Dspark.driver.port=$SPARK_DRIVER_PORT\"",
-                                       ),
-                                       List.empty,
-                                       List(s"$spark" -> SPARK_MASTER, "kafka1" -> BOOTSTRAP),
-                                       networkName = Some(networkName),
-                                     )
-                                   )
-                          _     <-
-                            Free.liftF(
-                              LoggingRequest(spark, slaveWait)
-                            )
-                        } yield spark,
-                      )
+    master_node     = toEndpoint(spark)
+    slave          <- startSparkWorker(client, spark, slaveWait, master_node, networkName)
     _              <- slaveLatch.get.timeout(20.seconds)
     _              <- IO.println("About to send messages")
     _              <- sendMessages
-    _              <- IO.println("About to read messages")
     endpoint        = "http://localhost:9000/"
     _              <- makeMinioBucket(endpoint).handleErrorWith { (x: Throwable) =>
-      IO { x.printStackTrace() } *> IO.println("Could not create bucket but that's OK if it's already been created")
-    }
-
+                        IO(x.printStackTrace()) *> IO.println(
+                          "Could not create bucket but that's OK if it's already been created"
+                        )
+                      }
+    _              <- IO.println("About to read messages")
     (query, df)    <- sparkRead(endpoint)
     _              <- IO.sleep(10.seconds)
     _              <- IO.println("About to send some more messages")
@@ -153,16 +100,6 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
                       )
   } yield println("Started and stopped" + spark)
 
-  private def toMinioEndpoint(minioName: List[String]) =
-    s"http://${toEndpointName(minioName.head)}:9000"
-
-  private def makeMinioBucket(endpoint: String) = IO {
-    val minioClient = MinioClient.builder
-      .endpoint(endpoint)
-      .credentials(MINIO_ROOT_USER, MINIO_ROOT_PASSWORD)
-      .build
-    minioClient.makeBucket(MakeBucketArgs.builder().bucket(BUCKET_NAME).build())
-  }
 
   private val sendMessages: IO[Unit] = {
     val bootstrapServer                                        = s"localhost:${OUTSIDE_KAFKA_BOOTSTRAP_PORT}"
@@ -176,19 +113,6 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       .drain
     messages
   }
-
-  def sparkS3Session(endpoint: String): SparkSession =
-    S3Utils.load_config(
-      SparkSession.builder
-        .appName("HelloWorld")
-        .master("spark://127.0.0.1:7077")
-        .config("spark.driver.host", "172.17.0.1")
-        .config("spark.driver.port", SPARK_DRIVER_PORT)
-        .getOrCreate(),
-      MINIO_ROOT_USER,
-      MINIO_ROOT_PASSWORD,
-      endpoint,
-    )
 
   def sparkRead(endpoint: String): IO[(StreamingQuery, DataFrame)] = IO {
     import org.apache.spark.sql.SparkSession
@@ -228,42 +152,5 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     (query2, df)
   }
 
-  def waitForMaster(
-      client:       DockerClient,
-      loggingLatch: LoggingLatch,
-      timeout:      FiniteDuration,
-  ): IO[ContainerId] = for {
-    sparkLatch <- Deferred[IO, String]
-    sparkWait   = loggingLatch("I have been elected leader! New state: ALIVE", sparkLatch)
-    spark      <- startMaster(port"8082", port"7077", client, sparkWait)
-    _          <- IO.println("Waiting for Spark master to start...")
-    _          <- sparkLatch.get.timeout(timeout)
-    _          <- IO.println("Spark master started")
-  } yield spark
 
-  def startMaster(
-      webPort:     Port,
-      servicePort: Port,
-      client:      DockerClient,
-      logging:     String => IO[Unit],
-  ): IO[ContainerId] = CatsDocker.interpret(
-    client,
-    for {
-      spark <- Free.liftF(sparkMaster(webPort, servicePort))
-      _     <-
-        Free.liftF(
-          LoggingRequest(spark, logging)
-        )
-    } yield spark,
-  )
-
-  def sparkMaster(webPort: Port, servicePort: Port): StartRequest = StartRequest(
-    ImageName("ph1ll1phenry/spark_master_3_3_0_scala_2_13_hadoop_3"),
-    Command("/bin/bash /master.sh"),
-    List("INIT_DAEMON_STEP=setup_spark"),
-    List(8080 -> webPort.value, 7077 -> servicePort.value),
-    List.empty,
-    networkName = Some(networkName),
-    name = Some(SPARK_MASTER),
-  )
 }

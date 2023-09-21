@@ -1,6 +1,6 @@
 package uk.co.odinconsultants.sss
 import org.apache.spark.sql.SaveMode
-import uk.co.odinconsultants.sss.SparkStructuredStreamingMain.sparkS3Session
+import uk.co.odinconsultants.SparkUtils.sparkS3Session
 
 /**
  * See https://medium.com/@dineshvarma.guduru/reading-and-writing-data-from-to-minio-using-spark-8371aefa96d2
