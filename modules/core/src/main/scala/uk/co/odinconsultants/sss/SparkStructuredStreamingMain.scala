@@ -9,7 +9,14 @@ import uk.co.odinconsultants.dreadnought.docker.Logging.{ioPrintln, verboseWaitF
 import uk.co.odinconsultants.dreadnought.docker.*
 import com.comcast.ip4s.*
 import com.github.dockerjava.api.DockerClient
-import fs2.kafka.{ProducerRecord, ProducerRecords, ProducerResult, ProducerSettings, TransactionalKafkaProducer, TransactionalProducerSettings}
+import fs2.kafka.{
+  ProducerRecord,
+  ProducerRecords,
+  ProducerResult,
+  ProducerSettings,
+  TransactionalKafkaProducer,
+  TransactionalProducerSettings,
+}
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.streaming.StreamingQuery
 import org.apache.spark.sql.functions.*
@@ -19,8 +26,22 @@ import uk.co.odinconsultants.dreadnought.docker.KafkaRaft
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, verboseWaitFor}
 import uk.co.odinconsultants.S3Utils
 import io.minio.{MakeBucketArgs, MinioClient}
-import uk.co.odinconsultants.S3Utils.{BUCKET_NAME, MINIO_ROOT_PASSWORD, MINIO_ROOT_USER, load_config, makeMinioBucket, startMinio}
-import uk.co.odinconsultants.SparkUtils.{BOOTSTRAP, SPARK_DRIVER_PORT, SPARK_MASTER, sparkS3Session, startSparkWorker, waitForMaster}
+import uk.co.odinconsultants.S3Utils.{
+  BUCKET_NAME,
+  MINIO_ROOT_PASSWORD,
+  MINIO_ROOT_USER,
+  load_config,
+  makeMinioBucket,
+  startMinio,
+}
+import uk.co.odinconsultants.SparkUtils.{
+  BOOTSTRAP,
+  SPARK_DRIVER_PORT,
+  SPARK_MASTER,
+  sparkS3Session,
+  startSparkWorker,
+  waitForMaster,
+}
 
 import java.util.{Date, TimeZone}
 import scala.collection.immutable.List
@@ -36,6 +57,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
   val TOPIC_NAME                   = "test_topic"
   val networkName                  = "my_network"
   val OUTSIDE_KAFKA_BOOTSTRAP_PORT = port"9111" // hard coded - not good
+  val TIME_FORMATE                 = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
 
   def toNetworkName(x: String): String = x.replace("/", "")
 
@@ -43,13 +65,15 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
 
   def toEndpointName(x: String): String = x.substring(0, 12)
 
+  def ioLog(x: String): IO[Unit] = IO.println(s"PH ${new Date()}: $x")
+
   /** TODO
     * Pull images
     */
   def run: IO[Unit] = for {
     client <- CatsDocker.client
     _      <- removeNetwork(client, networkName).handleErrorWith(x =>
-                IO.println(s"Did not delete network $networkName.\n${x.getMessage}")
+                ioLog(s"Did not delete network $networkName.\n${x.getMessage}")
               )
     _      <- createNetwork(client, networkName)
 
@@ -68,7 +92,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
         KafkaRaft.startKafkas(loggers, networkName),
       )
     _              <- kafkaStart.get.timeout(20.seconds)
-    _              <- IO.println(s"About to create topic $TOPIC_NAME")
+    _              <- ioLog(s"About to create topic $TOPIC_NAME")
     _              <- IO(createCustomTopic(TOPIC_NAME, OUTSIDE_KAFKA_BOOTSTRAP_PORT))
     spark          <-
       waitForMaster(
@@ -88,27 +112,27 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       masterName.map((x: String) => toNetworkName(x) -> SPARK_MASTER) ++ bootstrapNames.map(
         (x: String) => toNetworkName(x) -> BOOTSTRAP
       )
-    _              <- IO.println(s"About to start slave with bootstrap mappings to $mappings...")
+    _              <- ioLog(s"About to start slave with bootstrap mappings to $mappings...")
     master_node     = toEndpoint(spark)
     slave          <- startSparkWorker(client, spark, slaveWait, master_node, networkName)
     _              <- slaveLatch.get.timeout(20.seconds)
     endpoint        = "http://localhost:9000/"
     _              <- makeMinioBucket(endpoint).handleErrorWith { (x: Throwable) =>
-      IO(x.printStackTrace()) *> IO.println(
-      "Could not create bucket but that's OK if it's already been created"
-      )
-    }
-    _              <- IO.println("About to send messages")
+                        IO(x.printStackTrace()) *> ioLog(
+                          "Could not create bucket but that's OK if it's already been created"
+                        )
+                      }
+    _              <- ioLog("About to send messages")
     _              <- sendMessages
-    _              <- IO.println("About to read messages")
+    _              <- ioLog("About to read messages")
     _              <-
-      (sparkRead(endpoint) *>
+      (sparkRead(endpoint).start *>
         IO.sleep(10.seconds) *>
-        IO.println(
+        ioLog(
           "About to send some more messages"
         ) *>
         sendMessages *>
-        IO.println("About to close down. Press return to end") *>
+        ioLog("About to close down. Press return to end") *>
         IO.readLine).handleErrorWith(t => IO(t.printStackTrace()))
     _              <- race(toInterpret(client))(
                         (List(spark, slave, minio) ++ kafkas).map(StopRequest.apply)
@@ -132,7 +156,9 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
           produceWithoutOffsets(producer, TOPIC_NAME)
         messages
       }
-      .handleErrorWith(x => Stream.eval(IO(x.printStackTrace())))
+      .handleErrorWith(x =>
+        Stream.eval(ioLog("Failed to send messages") *> IO(x.printStackTrace()))
+      )
       .compile
       .drain
   }
@@ -142,17 +168,17 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       topic:    String,
   ): Stream[IO, ProducerResult[String, String]] =
     createPureMessages(topic).evalMap { case record =>
-      IO.println(s"buffering $record") *> producer.produceWithoutOffsets(record)
+      ioLog(s"buffering $record") *> producer.produceWithoutOffsets(record)
     }
 
   def createPureMessages(topic: String): Stream[IO, ProducerRecords[String, String]] = {
     val tz = TimeZone.getTimeZone("UTC")
-    val df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z") // Quoted "Z" to indicate UTC, no
+    val df = new SimpleDateFormat(TIME_FORMATE)
+//    df.setTimeZone(tz)
 
-    df.setTimeZone(tz)
     Stream
       .emits(List("a", "b", "c", "d").zipWithIndex)
-      .evalTap(x => IO.println(s"Creating message $x"))
+      .evalTap(x => ioLog(s"Creating message $x"))
       .map((x, i) => ProducerRecords.one(ProducerRecord(topic, s"key_$x", df.format(new Date()))))
       .covary[IO]
   }
@@ -177,8 +203,9 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       .load()
     val path                = s"s3a://$BUCKET_NAME/test"
     df.printSchema()
-    val col_ts     = "ts"
-    val query2 = df.select(col("key"), to_timestamp(col("value").cast(StringType), "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").alias(col_ts))
+    val col_ts              = "ts"
+    val query2              = df
+      .select(col("key"), to_timestamp(col("value").cast(StringType), TIME_FORMATE).alias(col_ts))
       .withWatermark(col_ts, "60 seconds")
       .writeStream
       .format("parquet")
@@ -189,7 +216,8 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       .trigger(Trigger.ProcessingTime(10000))
       .queryName("console")
       .start()
-    query2.awaitTermination(20000)
+    query2.awaitTermination()
+    ioLog("Finished streaming")
     (query2, df)
   }
 
