@@ -11,12 +11,18 @@ import com.github.dockerjava.api.DockerClient
 import fs2.kafka.ProducerSettings
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.streaming.StreamingQuery
-import uk.co.odinconsultants.S3Utils.{MINIO_ROOT_PASSWORD, MINIO_ROOT_USER, load_config}
+import uk.co.odinconsultants.S3Utils.{
+  ENDPOINT_S3,
+  MINIO_ROOT_PASSWORD,
+  MINIO_ROOT_USER,
+  load_config,
+}
 import uk.co.odinconsultants.dreadnought.docker.CatsDocker.{createNetwork, interpret, removeNetwork}
 import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
 import uk.co.odinconsultants.dreadnought.docker.KafkaRaft
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, verboseWaitFor}
 import com.comcast.ip4s.*
+
 import scala.concurrent.duration.*
 
 object SparkUtils {
@@ -31,6 +37,7 @@ object SparkUtils {
       slaveWait:   String => IO[Unit],
       master_node: String,
       networkName: String,
+      s3_node:     String,
   ): IO[ContainerId] = CatsDocker.interpret(
     client,
     for {
@@ -51,7 +58,11 @@ object SparkUtils {
                      s"SPARK_WORKER_OPTS=\"-Dspark.driver.host=172.17.0.1 -Dspark.driver.port=$SPARK_DRIVER_PORT\"",
                    ),
                    List.empty,
-                   List(s"$master" -> SPARK_MASTER, "kafka1" -> BOOTSTRAP),
+                   List(
+                     s"$master"  -> SPARK_MASTER,
+                     "kafka1"    -> BOOTSTRAP,
+                     s"$s3_node" -> ENDPOINT_S3,
+                   ),
                    networkName = Some(networkName),
                  )
                )
@@ -67,10 +78,11 @@ object SparkUtils {
       loggingLatch: LoggingLatch,
       timeout:      FiniteDuration,
       networkName:  String,
+      dnsMappings:  DnsMapping[String],
   ): IO[ContainerId] = for {
     sparkLatch <- Deferred[IO, String]
     sparkWait   = loggingLatch("I have been elected leader! New state: ALIVE", sparkLatch)
-    spark      <- startMaster(port"8082", port"7077", client, sparkWait, networkName)
+    spark      <- startMaster(port"8082", port"7077", client, sparkWait, networkName, dnsMappings)
     _          <- IO.println("Waiting for Spark master to start...")
     _          <- sparkLatch.get.timeout(timeout)
     _          <- IO.println("Spark master started")
@@ -82,10 +94,11 @@ object SparkUtils {
       client:      DockerClient,
       logging:     String => IO[Unit],
       networkName: String,
+      dnsMappings: DnsMapping[String],
   ): IO[ContainerId] = CatsDocker.interpret(
     client,
     for {
-      spark <- Free.liftF(sparkMaster(webPort, servicePort, networkName))
+      spark <- Free.liftF(sparkMaster(webPort, servicePort, networkName, dnsMappings))
       _     <-
         Free.liftF(
           LoggingRequest(spark, logging)
@@ -93,13 +106,18 @@ object SparkUtils {
     } yield spark,
   )
 
-  def sparkMaster(webPort: Port, servicePort: Port, networkName: String): StartRequest =
+  def sparkMaster(
+      webPort:     Port,
+      servicePort: Port,
+      networkName: String,
+      dnsMappings: DnsMapping[String],
+  ): StartRequest =
     StartRequest(
       ImageName("ph1ll1phenry/spark_master_3_3_0_scala_2_13_hadoop_3"),
       Command("/bin/bash /master.sh"),
       List("INIT_DAEMON_STEP=setup_spark"),
       List(8080 -> webPort.value, 7077 -> servicePort.value),
-      List.empty,
+      dnsMappings,
       networkName = Some(networkName),
       name = Some(SPARK_MASTER),
     )

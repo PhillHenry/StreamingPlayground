@@ -21,6 +21,7 @@ object S3Utils {
   val MINIO_ROOT_USER     = "minio-root-user"
   val MINIO_ROOT_PASSWORD = "minio-root-password"
   val BUCKET_NAME         = "mybucket"
+  val ENDPOINT_S3         = "mys3"
 
   /** @param access_key AWS_ACCESS_KEY_ID
     * @param secret_key AWS_SECRET_ACCESS_KEY
@@ -47,8 +48,7 @@ object S3Utils {
     session
   }
 
-  def startMinio(client: DockerClient, networkName: String): IO[ContainerId] = {
-    val dir = "/tmp/minio_test"
+  def startMinio(client: DockerClient, networkName: String, dir: String): IO[ContainerId] =
     IO(Files.createDirectories(FileSystems.getDefault().getPath(dir))).handleErrorWith(t =>
       IO.println(s"Could not create $dir")
     ) *>
@@ -71,7 +71,6 @@ object S3Utils {
                    )
         } yield minio,
       )
-  }
 
   def makeMinioBucket(endpoint: String): IO[Unit] = IO {
     val minioClient = MinioClient.builder

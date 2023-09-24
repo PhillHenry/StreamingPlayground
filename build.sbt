@@ -34,11 +34,12 @@ val commonSettings = List(
     Libraries.dreadnoughtExamples,
     Libraries.hadoopAws,
     Libraries.minio,
-  )
+    Libraries.burningWave,
+  ),
 )
 
 dependencyOverrides += "com.fasterxml.jackson.core" % "jackson-databind" % "2.12.3"
-dependencyOverrides += "com.fasterxml.jackson.core" % "jackson-core" % "2.12.3"
+dependencyOverrides += "com.fasterxml.jackson.core" % "jackson-core"     % "2.12.3"
 
 lazy val root = (project in file("."))
   .settings(

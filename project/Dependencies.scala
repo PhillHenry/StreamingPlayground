@@ -118,8 +118,11 @@ object Dependencies {
     val spark      = ("org.apache.spark" %% "spark-sql" % "3.2.1").cross(CrossVersion.for3Use2_13)
     val sparkKafka =
       ("org.apache.spark" %% "spark-sql-kafka-0-10" % "3.2.1").cross(CrossVersion.for3Use2_13)
-    val hadoopAws = "org.apache.hadoop" % "hadoop-aws" % V.hadoopAws exclude("com.fasterxml.jackson.core", "jackson-databind")
-    val minio     = "io.minio"          % "minio" % V.minio exclude("com.fasterxml.jackson.core", "jackson-databind")
+    val hadoopAws = ("org.apache.hadoop" % "hadoop-aws" % V.hadoopAws)
+      .exclude("com.fasterxml.jackson.core", "jackson-databind")
+    val minio     =
+      ("io.minio" % "minio" % V.minio).exclude("com.fasterxml.jackson.core", "jackson-databind")
+    val burningWave = "org.burningwave" % "tools" % "0.25.8"
 
   }
 

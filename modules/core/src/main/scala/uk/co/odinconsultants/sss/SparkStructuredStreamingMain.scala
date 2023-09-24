@@ -28,6 +28,7 @@ import uk.co.odinconsultants.S3Utils
 import io.minio.{MakeBucketArgs, MinioClient}
 import uk.co.odinconsultants.S3Utils.{
   BUCKET_NAME,
+  ENDPOINT_S3,
   MINIO_ROOT_PASSWORD,
   MINIO_ROOT_USER,
   load_config,
@@ -49,7 +50,13 @@ import scala.concurrent.duration.*
 import cats.effect.Resource
 import fs2.kafka.{ValueDeserializer, ValueSerializer}
 import org.apache.spark.sql.types.StringType
+import org.burningwave.tools.net.{
+  DefaultHostResolver,
+  HostResolutionRequestInterceptor,
+  MappedHostResolver,
+}
 
+import java.nio.file.Files
 import java.text.SimpleDateFormat
 
 object SparkStructuredStreamingMain extends IOApp.Simple {
@@ -71,13 +78,14 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     * Pull images
     */
   def run: IO[Unit] = for {
-    client <- CatsDocker.client
-    _      <- removeNetwork(client, networkName).handleErrorWith(x =>
-                ioLog(s"Did not delete network $networkName.\n${x.getMessage}")
-              )
-    _      <- createNetwork(client, networkName)
-
-    minio          <- startMinio(client, networkName)
+    client         <- CatsDocker.client
+    _              <- removeNetwork(client, networkName).handleErrorWith(x =>
+                        ioLog(s"Did not delete network $networkName.\n${x.getMessage}")
+                      )
+    _              <- createNetwork(client, networkName)
+    dir             = Files.createTempDirectory("PH").toString
+    _              <- ioLog(s"directory = $dir")
+    minio          <- startMinio(client, networkName, dir)
     kafkaStart     <- Deferred[IO, String]
     kafkaLatch      =
       verboseWaitFor(Some(s"${Console.BLUE}kafka1: "))("started (kafka.server.Kafka", kafkaStart)
@@ -94,12 +102,14 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     _              <- kafkaStart.get.timeout(20.seconds)
     _              <- ioLog(s"About to create topic $TOPIC_NAME")
     _              <- IO(createCustomTopic(TOPIC_NAME, OUTSIDE_KAFKA_BOOTSTRAP_PORT))
+    s3_node         = toEndpoint(minio)
     spark          <-
       waitForMaster(
         client,
         verboseWaitFor(Some(s"${Console.MAGENTA}SparkMaster: ")),
         30.seconds,
         networkName,
+        List(s3_node -> ENDPOINT_S3)
       )
     masterName     <- CatsDocker.interpret(client, Free.liftF(NamesRequest(spark)))
     slaveLatch     <- Deferred[IO, String]
@@ -114,9 +124,10 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       )
     _              <- ioLog(s"About to start slave with bootstrap mappings to $mappings...")
     master_node     = toEndpoint(spark)
-    slave          <- startSparkWorker(client, spark, slaveWait, master_node, networkName)
+    endpoint        = s"http://$ENDPOINT_S3:9000/"
+    slave          <- startSparkWorker(client, spark, slaveWait, master_node, networkName, s3_node)
     _              <- slaveLatch.get.timeout(20.seconds)
-    endpoint        = "http://localhost:9000/"
+    _               = createLocalDnsMapping()
     _              <- makeMinioBucket(endpoint).handleErrorWith { (x: Throwable) =>
                         IO(x.printStackTrace()) *> ioLog(
                           "Could not create bucket but that's OK if it's already been created"
@@ -138,6 +149,14 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
                         (List(spark, slave, minio) ++ kafkas).map(StopRequest.apply)
                       )
   } yield println("Started and stopped" + spark)
+
+  def createLocalDnsMapping(): Unit = {
+    import scala.jdk.CollectionConverters.*
+    HostResolutionRequestInterceptor.INSTANCE.install(
+      new MappedHostResolver(Map(ENDPOINT_S3 -> "127.0.0.1").asJava),
+      DefaultHostResolver.INSTANCE,
+    );
+  }
 
   private val sendMessages: IO[Unit] = {
     val bootstrapServer                                        = s"localhost:${OUTSIDE_KAFKA_BOOTSTRAP_PORT}"
@@ -188,6 +207,10 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     import org.apache.spark.sql.streaming.{DataStreamWriter, OutputMode, Trigger}
 
     val spark = sparkS3Session(endpoint)
+    val path  = s"s3a://$BUCKET_NAME/test"
+    println(s"PH: About to write Parquet to $path at endpoing $endpoint")
+    spark.range(0, 10000).write.parquet(s"${path}_smoke_test")
+    println("PH: Have finished writing smoke test data frame")
 
     implicit val decoder    = org.apache.spark.sql.Encoders.STRING
     implicit val ts_decoder = org.apache.spark.sql.Encoders.TIMESTAMP
@@ -201,12 +224,18 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       .option("offset", "earliest")
       .option("startingOffsets", "earliest")
       .load()
-    val path                = s"s3a://$BUCKET_NAME/test"
     df.printSchema()
     val col_ts              = "ts"
+    val partition           = "partition"
     val query2              = df
-      .select(col("key"), to_timestamp(col("value").cast(StringType), TIME_FORMATE).alias(col_ts))
+      .select(
+        col("key"),
+        to_timestamp(col("value").cast(StringType), TIME_FORMATE).alias(col_ts),
+        col(partition),
+      )
       .withWatermark(col_ts, "60 seconds")
+      .groupBy(partition)
+      .agg(count("*"))
       .writeStream
       .format("parquet")
       .outputMode(OutputMode.Append())
