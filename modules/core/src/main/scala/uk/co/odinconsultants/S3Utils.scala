@@ -22,6 +22,7 @@ object S3Utils {
   val MINIO_ROOT_PASSWORD = "minio-root-password"
   val BUCKET_NAME         = "mybucket"
   val ENDPOINT_S3         = "mys3"
+  val URL_S3              = s"http://$ENDPOINT_S3:9000/"
 
   /** @param access_key AWS_ACCESS_KEY_ID
     * @param secret_key AWS_SECRET_ACCESS_KEY
@@ -63,7 +64,7 @@ object S3Utils {
                          s"MINIO_ROOT_USER=$MINIO_ROOT_USER",
                          s"MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD",
                        ),
-                       List(9000 -> 9000),
+                       List(9000 -> 9000, 9001 -> 9001),
                        List.empty,
                        networkName = Some(networkName),
                        volumes = List((dir, "/bitnami/minio/data")),

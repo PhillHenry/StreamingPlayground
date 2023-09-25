@@ -35,7 +35,7 @@ object Dependencies {
     val ip4s        = "3.1.3"
     val dreadnought = "0.1.9"
 
-    val spark     = "3.3.1"
+    val spark     = "3.3.0"
     val hadoopAws = "3.3.1"
     val minio     = "8.5.5"
   }
@@ -115,9 +115,9 @@ object Dependencies {
     val dreadnoughtDocker   = dreadnought("docker")
     val dreadnoughtExamples = dreadnought("examples")
 
-    val spark      = ("org.apache.spark" %% "spark-sql" % "3.2.1").cross(CrossVersion.for3Use2_13)
+    val spark      = ("org.apache.spark" %% "spark-sql" % V.spark).cross(CrossVersion.for3Use2_13)
     val sparkKafka =
-      ("org.apache.spark" %% "spark-sql-kafka-0-10" % "3.2.1").cross(CrossVersion.for3Use2_13)
+      ("org.apache.spark" %% "spark-sql-kafka-0-10" % V.spark).cross(CrossVersion.for3Use2_13)
     val hadoopAws = ("org.apache.hadoop" % "hadoop-aws" % V.hadoopAws)
       .exclude("com.fasterxml.jackson.core", "jackson-databind")
     val minio     =

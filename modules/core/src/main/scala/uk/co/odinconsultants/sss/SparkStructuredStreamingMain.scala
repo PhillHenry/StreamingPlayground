@@ -9,14 +9,7 @@ import uk.co.odinconsultants.dreadnought.docker.Logging.{ioPrintln, verboseWaitF
 import uk.co.odinconsultants.dreadnought.docker.*
 import com.comcast.ip4s.*
 import com.github.dockerjava.api.DockerClient
-import fs2.kafka.{
-  ProducerRecord,
-  ProducerRecords,
-  ProducerResult,
-  ProducerSettings,
-  TransactionalKafkaProducer,
-  TransactionalProducerSettings,
-}
+import fs2.kafka.{ProducerRecord, ProducerRecords, ProducerResult, ProducerSettings, TransactionalKafkaProducer, TransactionalProducerSettings}
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.streaming.StreamingQuery
 import org.apache.spark.sql.functions.*
@@ -26,23 +19,8 @@ import uk.co.odinconsultants.dreadnought.docker.KafkaRaft
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, verboseWaitFor}
 import uk.co.odinconsultants.S3Utils
 import io.minio.{MakeBucketArgs, MinioClient}
-import uk.co.odinconsultants.S3Utils.{
-  BUCKET_NAME,
-  ENDPOINT_S3,
-  MINIO_ROOT_PASSWORD,
-  MINIO_ROOT_USER,
-  load_config,
-  makeMinioBucket,
-  startMinio,
-}
-import uk.co.odinconsultants.SparkUtils.{
-  BOOTSTRAP,
-  SPARK_DRIVER_PORT,
-  SPARK_MASTER,
-  sparkS3Session,
-  startSparkWorker,
-  waitForMaster,
-}
+import uk.co.odinconsultants.S3Utils.{BUCKET_NAME, ENDPOINT_S3, MINIO_ROOT_PASSWORD, MINIO_ROOT_USER, URL_S3, load_config, makeMinioBucket, startMinio}
+import uk.co.odinconsultants.SparkUtils.{BOOTSTRAP, SPARK_DRIVER_PORT, SPARK_MASTER, sparkS3Session, startSparkWorker, waitForMaster}
 
 import java.util.{Date, TimeZone}
 import scala.collection.immutable.List
@@ -50,11 +28,7 @@ import scala.concurrent.duration.*
 import cats.effect.Resource
 import fs2.kafka.{ValueDeserializer, ValueSerializer}
 import org.apache.spark.sql.types.StringType
-import org.burningwave.tools.net.{
-  DefaultHostResolver,
-  HostResolutionRequestInterceptor,
-  MappedHostResolver,
-}
+import org.burningwave.tools.net.{DefaultHostResolver, HostResolutionRequestInterceptor, MappedHostResolver}
 
 import java.nio.file.Files
 import java.text.SimpleDateFormat
@@ -65,6 +39,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
   val networkName                  = "my_network"
   val OUTSIDE_KAFKA_BOOTSTRAP_PORT = port"9111" // hard coded - not good
   val TIME_FORMATE                 = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+  val SINK_PATH                    = s"s3a://$BUCKET_NAME/test"
 
   def toNetworkName(x: String): String = x.replace("/", "")
 
@@ -124,11 +99,10 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       )
     _              <- ioLog(s"About to start slave with bootstrap mappings to $mappings...")
     master_node     = toEndpoint(spark)
-    endpoint        = s"http://$ENDPOINT_S3:9000/"
     slave          <- startSparkWorker(client, spark, slaveWait, master_node, networkName, s3_node)
     _              <- slaveLatch.get.timeout(20.seconds)
     _               = createLocalDnsMapping()
-    _              <- makeMinioBucket(endpoint).handleErrorWith { (x: Throwable) =>
+    _              <- makeMinioBucket(URL_S3).handleErrorWith { (x: Throwable) =>
                         IO(x.printStackTrace()) *> ioLog(
                           "Could not create bucket but that's OK if it's already been created"
                         )
@@ -137,7 +111,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     _              <- sendMessages
     _              <- ioLog("About to read messages")
     _              <-
-      (sparkRead(endpoint).start *>
+      (sparkRead(URL_S3).start *>
         IO.sleep(10.seconds) *>
         ioLog(
           "About to send some more messages"
@@ -207,11 +181,6 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     import org.apache.spark.sql.streaming.{DataStreamWriter, OutputMode, Trigger}
 
     val spark = sparkS3Session(endpoint)
-    val path  = s"s3a://$BUCKET_NAME/test"
-    println(s"PH: About to write Parquet to $path at endpoing $endpoint")
-    spark.range(0, 10000).write.parquet(s"${path}_smoke_test")
-    println("PH: Have finished writing smoke test data frame")
-
     implicit val decoder    = org.apache.spark.sql.Encoders.STRING
     implicit val ts_decoder = org.apache.spark.sql.Encoders.TIMESTAMP
     val df                  = spark.readStream
@@ -234,14 +203,15 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
         col(partition),
       )
       .withWatermark(col_ts, "60 seconds")
-      .groupBy(partition)
+      .groupBy(partition, col_ts)
       .agg(count("*"))
+      .withWatermark(col_ts, "60 seconds")
       .writeStream
       .format("parquet")
       .outputMode(OutputMode.Append())
       .option("truncate", "false")
-      .option("path", path)
-      .option("checkpointLocation", path + "checkpoint")
+      .option("path", SINK_PATH)
+      .option("checkpointLocation", SINK_PATH + "checkpoint")
       .trigger(Trigger.ProcessingTime(10000))
       .queryName("console")
       .start()

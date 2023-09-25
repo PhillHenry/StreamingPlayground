@@ -30,6 +30,7 @@ object SparkUtils {
   val BOOTSTRAP         = "kafka1"
   val SPARK_MASTER      = "spark-master"
   val SPARK_DRIVER_PORT = 10027 // you'll need to open your firewall to this port
+  val SPARK_BLOCK_PORT  = 10028 // and this
 
   def startSparkWorker(
       client:      DockerClient,
@@ -129,6 +130,9 @@ object SparkUtils {
         .master("spark://127.0.0.1:7077")
         .config("spark.driver.host", "172.17.0.1")
         .config("spark.driver.port", SPARK_DRIVER_PORT)
+        .config("spark.driver.blockManager.port", SPARK_BLOCK_PORT)
+        .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.1")
+        .config("spark.jars", s"${System.getProperty("user.home")}/.cache/coursier/v1/https/repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.1/hadoop-aws-3.3.1.jar,${System.getProperty("user.home")}/.cache/coursier/v1/https/repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.11.901/aws-java-sdk-bundle-1.11.901.jar")
         .getOrCreate(),
       MINIO_ROOT_USER,
       MINIO_ROOT_PASSWORD,
