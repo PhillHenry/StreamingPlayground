@@ -10,7 +10,7 @@ import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.produceMessages
 import uk.co.odinconsultants.dreadnought.docker.Logging.verboseWaitFor
 import uk.co.odinconsultants.dreadnought.docker.SparkStructuredStreamingMain.startSparkCluster
 import uk.co.odinconsultants.dreadnought.docker.ZKKafkaMain.startKafkaCluster
-import uk.co.odinconsultants.sss.SparkStructuredStreamingMain.sparkRead
+import uk.co.odinconsultants.sss.SparkStructuredStreamingMain.sparkReadIO
 
 import scala.concurrent.duration.*
 
@@ -20,7 +20,7 @@ object SparkMain extends IOApp.Simple {
     * Pull images
     */
   def run: IO[Unit] = for {
-    _              <- sparkRead("TODO")
+    _              <- sparkReadIO("TODO")
   } yield println("Connected to Spark")
 
 }

@@ -14,14 +14,13 @@ import uk.co.odinconsultants.dreadnought.docker.Logging.verboseWaitFor
 import uk.co.odinconsultants.dreadnought.docker.PopularContainers.startKafkaOnPort
 import uk.co.odinconsultants.dreadnought.docker.SparkStructuredStreamingMain.{startSlave, startSparkCluster, waitForMaster}
 import uk.co.odinconsultants.dreadnought.docker.ZKKafkaMain.{kafkaEcosystem, startKafkaCluster}
+import uk.co.odinconsultants.sss.SSSUtils.TOPIC_NAME
 
 import java.util.UUID
 import scala.concurrent.duration.*
 
 object KafkaDemoMain extends IOApp.Simple {
 
-  val TOPIC_NAME = "test_topic"
-  val BOOTSTRAP  = "kafka_bootstrap"
   val BROKER     = "zk"
   val kafkaPort  = port"9093"
 

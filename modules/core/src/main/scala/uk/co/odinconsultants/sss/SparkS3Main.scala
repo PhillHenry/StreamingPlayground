@@ -1,7 +1,8 @@
 package uk.co.odinconsultants.sss
 import org.apache.spark.sql.{SaveMode, SparkSession, functions as F}
-import uk.co.odinconsultants.S3Utils.{BUCKET_NAME, MINIO_ROOT_PASSWORD, MINIO_ROOT_USER, URL_S3, load_config}
-import uk.co.odinconsultants.SparkUtils.{SPARK_BLOCK_PORT, SPARK_DRIVER_PORT, sparkS3Session}
+import uk.co.odinconsultants.MinioUtils.*
+import uk.co.odinconsultants.S3Utils.load_config
+import uk.co.odinconsultants.sss.SSSUtils.{SPARK_BLOCK_PORT, SPARK_DRIVER_PORT, sparkS3Session}
 
 /**
  * See https://medium.com/@dineshvarma.guduru/reading-and-writing-data-from-to-minio-using-spark-8371aefa96d2
