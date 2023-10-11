@@ -11,24 +11,19 @@ import com.github.dockerjava.api.DockerClient
 import fs2.kafka.ProducerSettings
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.streaming.StreamingQuery
-import uk.co.odinconsultants.MinioUtils.{
-  ENDPOINT_S3,
-  MINIO_ROOT_PASSWORD,
-  MINIO_ROOT_USER,
-}
+import uk.co.odinconsultants.MinioUtils.{ENDPOINT_S3, MINIO_ROOT_PASSWORD, MINIO_ROOT_USER}
 import uk.co.odinconsultants.dreadnought.docker.CatsDocker.{createNetwork, interpret, removeNetwork}
 import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
 import uk.co.odinconsultants.dreadnought.docker.KafkaRaft
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, verboseWaitFor}
 import com.comcast.ip4s.*
-import uk.co.odinconsultants.sss.SSSUtils.SPARK_DRIVER_PORT
+import uk.co.odinconsultants.sss.SSSUtils.{BOOTSTRAP, SPARK_DRIVER_PORT}
 import uk.co.odinconsultants.S3Utils.load_config
 
 import scala.concurrent.duration.*
 
 object SparkUtils {
 
-  val BOOTSTRAP         = "kafka1"
   val SPARK_MASTER      = "spark-master"
 
   def startSparkWorker(

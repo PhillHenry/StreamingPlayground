@@ -8,7 +8,7 @@ import uk.co.odinconsultants.S3Utils.{BUCKET_NAME, MINIO_ROOT_PASSWORD, MINIO_RO
 object SSSUtils {
 
   val TOPIC_NAME                       = "test_topic"
-  val BOOTSTRAP                        = "kafka_bootstrap"
+  val BOOTSTRAP                        = "kafka1"
   val OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT = 9111
   val TIME_FORMATE                     = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
   val SINK_PATH                        = s"s3a://$BUCKET_NAME/test"
@@ -25,7 +25,7 @@ object SSSUtils {
       .format("kafka")
       .option(
         "kafka.bootstrap.servers",
-        s"127.0.0.1:$OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT,$BOOTSTRAP:$OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT",
+        s"$BOOTSTRAP:$OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT",
       )
       .option("subscribe", TOPIC_NAME)
       .option("offset", "earliest")
@@ -53,7 +53,7 @@ object SSSUtils {
       .trigger(Trigger.ProcessingTime(10000))
       .queryName("console")
       .start()
-    query2.awaitTermination()
+    query2.awaitTermination(150000)
     (query2, df)
   }
 
