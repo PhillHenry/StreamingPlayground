@@ -21,7 +21,7 @@ import uk.co.odinconsultants.dreadnought.docker.CatsDocker.{createNetwork, inter
 import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
 import uk.co.odinconsultants.dreadnought.docker.*
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, ioPrintln, verboseWaitFor}
-import uk.co.odinconsultants.sss.SSSUtils.{OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT, SINK_PATH, TIME_FORMATE, sparkRead}
+import uk.co.odinconsultants.sss.SSSUtils.{OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT, SINK_PATH, TIME_FORMATE, sparkRead, BOOTSTRAP}
 
 import java.nio.file.Files
 import java.text.SimpleDateFormat

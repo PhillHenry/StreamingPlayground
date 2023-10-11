@@ -3,12 +3,9 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.streaming.StreamingQuery
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.sql.{DataFrame, SparkSession}
-import uk.co.odinconsultants.S3Utils.{
-  BUCKET_NAME,
-  MINIO_ROOT_PASSWORD,
-  MINIO_ROOT_USER,
-  load_config,
-}
+import uk.co.odinconsultants.S3Utils.{BUCKET_NAME, MINIO_ROOT_PASSWORD, MINIO_ROOT_USER, load_config}
+import org.burningwave.tools.net.{DefaultHostResolver, HostResolutionRequestInterceptor, MappedHostResolver}
+
 
 object SSSUtils {
 
@@ -30,7 +27,7 @@ object SSSUtils {
       .format("kafka")
       .option(
         "kafka.bootstrap.servers",
-        s"$BOOTSTRAP:$OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT",
+        s"$BOOTSTRAP:$OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT,localhost:${OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT + 20}",
       )
       .option("subscribe", TOPIC_NAME)
       .option("offset", "earliest")
@@ -85,7 +82,14 @@ object SSSUtils {
     )
   }
 
-  def main(args: Array[String]): Unit =
-    println(sparkRead("http://127.0.0.1:9000/"))
+  def main(args: Array[String]): Unit = {
+    val container_id = "9d4fc21c9c0b"
+    import scala.jdk.CollectionConverters._
+    HostResolutionRequestInterceptor.INSTANCE.install(
+      new MappedHostResolver(Map(container_id -> "127.0.0.1").asJava),
+      DefaultHostResolver.INSTANCE,
+    );
+    println(sparkRead("http://" + container_id + ":9000/"))
+  }
 
 }

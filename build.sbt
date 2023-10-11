@@ -66,7 +66,7 @@ lazy val core = (project in file("modules/core"))
   .dependsOn(lib, scala2)
 
 lazy val scala2 = (project in file("modules/scala2"))
-  .settings(List(scalaVersion := scala2V) ++ List(libraryDependencies := sparkAndKafka): _*)
+  .settings(List(scalaVersion := scala2V) ++ List(libraryDependencies := sparkAndKafka :+ Libraries.burningWave): _*)
 
 // integration tests
 lazy val it = (project in file("modules/it"))

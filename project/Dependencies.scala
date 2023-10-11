@@ -35,7 +35,7 @@ object Dependencies {
     val ip4s        = "3.1.3"
     val dreadnought = "0.1.9"
 
-    val spark     = "3.5.0"
+    val spark     = "3.3.0"
     val hadoopAws = "3.3.1"
     val minio     = "8.5.5"
   }
