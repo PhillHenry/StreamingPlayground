@@ -11,7 +11,11 @@ import org.apache.spark.sql.functions.*
 import org.apache.spark.sql.streaming.StreamingQuery
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.burningwave.tools.net.{DefaultHostResolver, HostResolutionRequestInterceptor, MappedHostResolver}
+import org.burningwave.tools.net.{
+  DefaultHostResolver,
+  HostResolutionRequestInterceptor,
+  MappedHostResolver,
+}
 import uk.co.odinconsultants.MinioUtils
 import uk.co.odinconsultants.MinioUtils.*
 import uk.co.odinconsultants.SparkUtils.*
@@ -21,7 +25,13 @@ import uk.co.odinconsultants.dreadnought.docker.CatsDocker.{createNetwork, inter
 import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
 import uk.co.odinconsultants.dreadnought.docker.*
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, ioPrintln, verboseWaitFor}
-import uk.co.odinconsultants.sss.SSSUtils.{OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT, SINK_PATH, TIME_FORMATE, sparkRead, BOOTSTRAP}
+import uk.co.odinconsultants.sss.SSSUtils.{
+  OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT,
+  SINK_PATH,
+  TIME_FORMATE,
+  sparkRead,
+  BOOTSTRAP,
+}
 
 import java.nio.file.Files
 import java.text.SimpleDateFormat
@@ -95,7 +105,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     master_node     = toEndpoint(spark)
     slave          <- startSparkWorker(client, spark, slaveWait, master_node, networkName, s3_node)
     _              <- slaveLatch.get.timeout(20.seconds)
-    _               = createLocalDnsMapping()
+    _               = createLocalDnsMapping(additional = Map(s3_node -> "127.0.0.1"))
     _              <- makeMinioBucket(URL_S3).handleErrorWith { (x: Throwable) =>
                         IO(x.printStackTrace()) *> ioLog(
                           "Could not create bucket but that's OK if it's already been created"
@@ -105,8 +115,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     _              <- sendMessages
     _              <- ioLog("About to read messages")
     _              <-
-      (
-//        sparkReadIO(URL_S3).start *>
+      ((sparkReadIO(s"http://$s3_node:9000/") *> ioLog("Finished reading messages")).start *>
         IO.sleep(10.seconds) *>
         ioLog(
           "About to send some more messages"
@@ -119,10 +128,10 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
                       )
   } yield println("Started and stopped" + spark)
 
-  def createLocalDnsMapping(): Unit = {
+  def createLocalDnsMapping(additional: Map[String, String] = Map.empty[String, String]): Unit = {
     import scala.jdk.CollectionConverters.*
     HostResolutionRequestInterceptor.INSTANCE.install(
-      new MappedHostResolver(Map(ENDPOINT_S3 -> "127.0.0.1").asJava),
+      new MappedHostResolver((Map(ENDPOINT_S3 -> "127.0.0.1") ++ additional).asJava),
       DefaultHostResolver.INSTANCE,
     );
   }
@@ -171,6 +180,6 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       .covary[IO]
   }
 
-  def sparkReadIO(endpoint: String): IO[(StreamingQuery, DataFrame)] = IO { sparkRead(endpoint) }
+  def sparkReadIO(endpoint: String): IO[(StreamingQuery, DataFrame)] = IO(sparkRead(endpoint))
 
 }
