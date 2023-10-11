@@ -57,7 +57,8 @@ object SSSUtils {
     (query2, df)
   }
 
-  def sparkS3Session(endpoint: String): SparkSession =
+  def sparkS3Session(endpoint: String): SparkSession = {
+    val home: String = System.getProperty("user.home")
     load_config(
       SparkSession.builder()
         .appName("HelloWorld")
@@ -68,12 +69,18 @@ object SSSUtils {
         .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.1")
         .config(
           "spark.jars",
-          s"${System.getProperty("user.home")}/.cache/coursier/v1/https/repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.1/hadoop-aws-3.3.1.jar,${System.getProperty("user.home")}/.cache/coursier/v1/https/repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.11.901/aws-java-sdk-bundle-1.11.901.jar",
+//          s"$home/.m2/repository/org/apache/spark/spark-sql-kafka-0-10_2.12/3.5.0/spark-sql-kafka-0-10_2.12-3.5.0.jar,$home/.m2/repository/org/apache/spark/spark-token-provider-kafka-0-10_2.12/3.5.0/spark-token-provider-kafka-0-10_2.12-3.5.0.jar,$home/.m2/repository/org/apache/kafka/kafka-clients/2.8.1/kafka-clients-2.8.1.jar,$home/.m2/repository/org/apache/commons/commons-pool2/2.11.1/commons-pool2-2.11.1.jar"
+            s"$home/.m2/repository/org/apache/spark/spark-sql-kafka-0-10_2.13/3.3.0/spark-sql-kafka-0-10_2.13-3.3.0.jar,$home/.m2/repository/org/apache/spark/spark-token-provider-kafka-0-10_2.13/3.3.0/spark-token-provider-kafka-0-10_2.13-3.3.0.jar,$home/.m2/repository/org/apache/kafka/kafka-clients/2.8.1/kafka-clients-2.8.1.jar,$home/.m2/repository/org/apache/commons/commons-pool2/2.11.1/commons-pool2-2.11.1.jar"
         )
         .getOrCreate(),
       MINIO_ROOT_USER,
       MINIO_ROOT_PASSWORD,
       endpoint,
     )
+  }
+
+  def main(args: Array[String]): Unit = {
+    println(sparkRead("http://127.0.0.1:9000/"))
+  }
 
 }

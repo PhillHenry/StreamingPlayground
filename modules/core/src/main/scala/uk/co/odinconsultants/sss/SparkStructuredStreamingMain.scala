@@ -105,7 +105,8 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     _              <- sendMessages
     _              <- ioLog("About to read messages")
     _              <-
-      (sparkReadIO(URL_S3).start *>
+      (
+//        sparkReadIO(URL_S3).start *>
         IO.sleep(10.seconds) *>
         ioLog(
           "About to send some more messages"

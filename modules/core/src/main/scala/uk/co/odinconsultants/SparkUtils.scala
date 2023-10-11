@@ -53,9 +53,14 @@ object SparkUtils {
                  StartRequest(
                    ImageName("ph1ll1phenry/spark_worker_3_3_0_scala_2_13_hadoop_3"),
                    Command("/bin/bash /worker.sh"),
+//                   ImageName("bitnami/spark"),
+//                   Command("/opt/bitnami/scripts/spark/run.sh"),
                    List(
                      s"SPARK_MASTER=spark://${master_node}:7077",
+                     s"spark-master=spark://${master_node}:7077",
+                     s"SPARK_MASTER_URL=spark://${master_node}:7077",
                      s"SPARK_WORKER_OPTS=\"-Dspark.driver.host=172.17.0.1 -Dspark.driver.port=$SPARK_DRIVER_PORT\"",
+                     "SPARK_MODE=definitely_not"
                    ),
                    List.empty,
                    List(
@@ -113,6 +118,9 @@ object SparkUtils {
       dnsMappings: DnsMapping[String],
   ): StartRequest =
     StartRequest(
+//      ImageName("bitnami/spark"),
+//      Command("/opt/bitnami/scripts/spark/run.sh"),
+//      List("INIT_DAEMON_STEP=setup_spark", "SPARK_MODE=master"),
       ImageName("ph1ll1phenry/spark_master_3_3_0_scala_2_13_hadoop_3"),
       Command("/bin/bash /master.sh"),
       List("INIT_DAEMON_STEP=setup_spark"),
