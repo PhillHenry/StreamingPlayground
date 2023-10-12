@@ -11,11 +11,7 @@ import org.apache.spark.sql.functions.*
 import org.apache.spark.sql.streaming.StreamingQuery
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.burningwave.tools.net.{
-  DefaultHostResolver,
-  HostResolutionRequestInterceptor,
-  MappedHostResolver,
-}
+import org.burningwave.tools.net.{DefaultHostResolver, HostResolutionRequestInterceptor, MappedHostResolver}
 import uk.co.odinconsultants.MinioUtils
 import uk.co.odinconsultants.MinioUtils.*
 import uk.co.odinconsultants.SparkUtils.*
@@ -25,13 +21,7 @@ import uk.co.odinconsultants.dreadnought.docker.CatsDocker.{createNetwork, inter
 import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
 import uk.co.odinconsultants.dreadnought.docker.*
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, ioPrintln, verboseWaitFor}
-import uk.co.odinconsultants.sss.SSSUtils.{
-  OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT,
-  SINK_PATH,
-  TIME_FORMATE,
-  sparkRead,
-  BOOTSTRAP,
-}
+import uk.co.odinconsultants.sss.SSSUtils.{BOOTSTRAP, OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT, SINK_PATH, TIME_FORMATE, TOPIC_NAME, sparkRead}
 
 import java.nio.file.Files
 import java.text.SimpleDateFormat
@@ -41,7 +31,6 @@ import scala.concurrent.duration.*
 
 object SparkStructuredStreamingMain extends IOApp.Simple {
 
-  val TOPIC_NAME                   = "test_topic"
   val networkName                  = "my_network"
   val OUTSIDE_KAFKA_BOOTSTRAP_PORT = port"9111" // hard coded - not good
 
@@ -117,10 +106,10 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     _              <-
       ((sparkReadIO(s"http://$s3_node:9000/") *> ioLog("Finished reading messages")).start *>
         IO.sleep(10.seconds) *>
-        ioLog(
+        (ioLog(
           "About to send some more messages"
         ) *>
-        sendMessages *>
+        sendMessages *> IO.sleep(10.seconds)).foreverM.start *>
         ioLog("About to close down. Press return to end") *>
         IO.readLine).handleErrorWith(t => IO(t.printStackTrace()))
     _              <- race(toInterpret(client))(
@@ -171,7 +160,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
   def createPureMessages(topic: String): Stream[IO, ProducerRecords[String, String]] = {
     val tz = TimeZone.getTimeZone("UTC")
     val df = new SimpleDateFormat(TIME_FORMATE)
-//    df.setTimeZone(tz)
+    df.setTimeZone(tz)
 
     Stream
       .emits(List("a", "b", "c", "d").zipWithIndex)

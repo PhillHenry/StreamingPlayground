@@ -1,7 +1,7 @@
 package uk.co.odinconsultants.sss
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.streaming.StreamingQuery
-import org.apache.spark.sql.types.StringType
+//import org.apache.spark.sql.types.StringType
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import uk.co.odinconsultants.S3Utils.{BUCKET_NAME, MINIO_ROOT_PASSWORD, MINIO_ROOT_USER, load_config}
 import org.burningwave.tools.net.{DefaultHostResolver, HostResolutionRequestInterceptor, MappedHostResolver}
@@ -39,7 +39,7 @@ object SSSUtils {
     val query2    = df
       .select(
         col("key"),
-        to_timestamp(col("value").cast(StringType), TIME_FORMATE).alias(col_ts),
+        current_timestamp().alias(col_ts),
         col(partition),
       )
       .withWatermark(col_ts, "60 seconds")
@@ -55,7 +55,7 @@ object SSSUtils {
       .trigger(Trigger.ProcessingTime(10000))
       .queryName("console")
       .start()
-    query2.awaitTermination(150000)
+    query2.awaitTermination(180000)
     (query2, df)
   }
 
