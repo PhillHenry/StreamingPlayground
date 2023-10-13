@@ -90,7 +90,7 @@ object KafkaDemoMain extends IOApp.Simple {
       .stream(
         TransactionalProducerSettings(
           s"transactionId${System.currentTimeMillis()}",
-          producerSettings.withRetries(10),
+          producerSettings.withRetries(1),
         )
       )
       .flatMap { producer =>
@@ -112,7 +112,7 @@ object KafkaDemoMain extends IOApp.Simple {
       numMessages: Int,
   ): Stream[IO, TransactionalProducerRecords[IO, String, String]] =
     Stream
-      .emits((1 to numMessages).zipWithIndex)
+      .emits((0 to numMessages - 1).zipWithIndex)
       .map { case (k, v) =>
         TransactionalProducerRecords.one(
           CommittableProducerRecords.one(
