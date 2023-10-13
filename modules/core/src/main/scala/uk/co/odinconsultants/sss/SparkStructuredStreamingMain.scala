@@ -21,6 +21,7 @@ import uk.co.odinconsultants.dreadnought.docker.CatsDocker.{createNetwork, inter
 import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
 import uk.co.odinconsultants.dreadnought.docker.*
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, ioPrintln, verboseWaitFor}
+import uk.co.odinconsultants.kafka.KafkaUtils.startKafkas
 import uk.co.odinconsultants.sss.SSSUtils.{BOOTSTRAP, OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT, SINK_PATH, TIME_FORMATE, TOPIC_NAME, sparkRead}
 
 import java.nio.file.Files
@@ -54,22 +55,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     dir             = Files.createTempDirectory("PH").toString
     _              <- ioLog(s"directory = $dir")
     minio          <- startMinio(client, networkName, dir)
-    kafkaStart     <- Deferred[IO, String]
-    kafkaLatch      =
-      verboseWaitFor(Some(s"${Console.BLUE}kafka1: "))("started (kafka.server.Kafka", kafkaStart)
-    loggers         = List(
-                        kafkaLatch,
-                        ioPrintln(Some(s"${Console.GREEN}kafka2: ")),
-                        ioPrintln(Some(s"${Console.YELLOW}kafka3: ")),
-                      )
-    kafkas         <-
-      interpret(
-        client,
-        KafkaRaft.startKafkas(loggers, networkName),
-      )
-    _              <- kafkaStart.get.timeout(20.seconds)
-    _              <- ioLog(s"About to create topic $TOPIC_NAME")
-    _              <- IO(createCustomTopic(TOPIC_NAME, OUTSIDE_KAFKA_BOOTSTRAP_PORT))
+    kafkas         <- startKafkas(client, networkName)
     s3_node         = toEndpoint(minio)
     spark          <-
       waitForMaster(
@@ -109,7 +95,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
         (ioLog(
           "About to send some more messages"
         ) *>
-        sendMessages *> IO.sleep(10.seconds)).foreverM.start *>
+          sendMessages *> IO.sleep(10.seconds)).foreverM.start *>
         ioLog("About to close down. Press return to end") *>
         IO.readLine).handleErrorWith(t => IO(t.printStackTrace()))
     _              <- race(toInterpret(client))(
