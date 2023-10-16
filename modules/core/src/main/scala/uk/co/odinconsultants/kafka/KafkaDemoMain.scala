@@ -5,20 +5,7 @@ import cats.effect.{Deferred, IO, IOApp}
 import cats.free.Free
 import com.comcast.ip4s.{port, *}
 import fs2.Stream
-import fs2.kafka.{
-  AutoOffsetReset,
-  CommittableConsumerRecord,
-  CommittableOffset,
-  CommittableProducerRecords,
-  ConsumerRecord,
-  ConsumerSettings,
-  KafkaConsumer,
-  ProducerRecord,
-  ProducerSettings,
-  TransactionalKafkaProducer,
-  TransactionalProducerRecords,
-  TransactionalProducerSettings,
-}
+import fs2.kafka.{AutoOffsetReset, CommittableConsumerRecord, CommittableOffset, CommittableProducerRecords, ConsumerRecord, ConsumerSettings, KafkaConsumer, ProducerRecord, ProducerResult, ProducerSettings, TransactionalKafkaProducer, TransactionalProducerRecords, TransactionalProducerSettings}
 import uk.co.odinconsultants.dreadnought.Flow.race
 import uk.co.odinconsultants.dreadnought.docker.{CatsDocker, StopRequest}
 import uk.co.odinconsultants.dreadnought.docker.Algebra.toInterpret
@@ -26,18 +13,10 @@ import uk.co.odinconsultants.dreadnought.docker.CatsDocker.interpret
 import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
 import uk.co.odinconsultants.dreadnought.docker.Logging.{ioPrintln, verboseWaitFor}
 import uk.co.odinconsultants.dreadnought.docker.PopularContainers.startKafkaOnPort
-import uk.co.odinconsultants.dreadnought.docker.SparkStructuredStreamingMain.{
-  startSlave,
-  startSparkCluster,
-  waitForMaster,
-}
+import uk.co.odinconsultants.dreadnought.docker.SparkStructuredStreamingMain.{startSlave, startSparkCluster, waitForMaster}
 import uk.co.odinconsultants.dreadnought.docker.ZKKafkaMain.{kafkaEcosystem, startKafkaCluster}
 import uk.co.odinconsultants.sss.SSSUtils.TOPIC_NAME
-import uk.co.odinconsultants.sss.SparkStructuredStreamingMain.{
-  OUTSIDE_KAFKA_BOOTSTRAP_PORT,
-  ioLog,
-  networkName,
-}
+import uk.co.odinconsultants.sss.SparkStructuredStreamingMain.{OUTSIDE_KAFKA_BOOTSTRAP_PORT, ioLog, networkName}
 
 import java.util.UUID
 import scala.concurrent.duration.*
@@ -55,9 +34,9 @@ object KafkaDemoMain extends IOApp.Simple {
     client     <- CatsDocker.client
     kafkas     <- KafkaUtils.startKafkas(client, networkName)
     numMessages = 100
-    _          <- sendMessages(numMessages)
+    _          <- ioLog("About to send messages...") *> sendMessages(numMessages)
     latch      <- CountDownLatch[IO](numMessages)
-    _          <- consume(
+    _          <- ioLog("About to read messages...") *> consume(
                     ConsumerSettings[IO, String, String]
                       .withAutoOffsetReset(AutoOffsetReset.Earliest)
                       .withBootstrapServers(bootstrapServer)
@@ -85,7 +64,7 @@ object KafkaDemoMain extends IOApp.Simple {
       producerSettings: ProducerSettings[IO, String, String],
       topic:            String,
       numMessages:      Int,
-  ) =
+  ): Stream[IO, ProducerResult[String, String]] =
     TransactionalKafkaProducer
       .stream(
         TransactionalProducerSettings(
@@ -101,10 +80,10 @@ object KafkaDemoMain extends IOApp.Simple {
       producer:    TransactionalKafkaProducer[IO, String, String],
       topic:       String,
       numMessages: Int,
-  ) =
+  ): Stream[IO, ProducerResult[String, String]] =
     eachMessageInItsOwnTX(topic, numMessages)
       .evalMap { case record =>
-        producer.produce(record)
+        ioLog(s"About to produce $record") *> producer.produce(record)
       }
 
   def eachMessageInItsOwnTX(
