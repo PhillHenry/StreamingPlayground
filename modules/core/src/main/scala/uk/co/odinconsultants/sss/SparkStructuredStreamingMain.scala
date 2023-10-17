@@ -11,7 +11,11 @@ import org.apache.spark.sql.functions.*
 import org.apache.spark.sql.streaming.StreamingQuery
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.burningwave.tools.net.{DefaultHostResolver, HostResolutionRequestInterceptor, MappedHostResolver}
+import org.burningwave.tools.net.{
+  DefaultHostResolver,
+  HostResolutionRequestInterceptor,
+  MappedHostResolver,
+}
 import uk.co.odinconsultants.MinioUtils
 import uk.co.odinconsultants.MinioUtils.*
 import uk.co.odinconsultants.SparkUtils.*
@@ -22,7 +26,16 @@ import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
 import uk.co.odinconsultants.dreadnought.docker.*
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, ioPrintln, verboseWaitFor}
 import uk.co.odinconsultants.kafka.KafkaUtils.startKafkas
-import uk.co.odinconsultants.sss.SSSUtils.{BOOTSTRAP, OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT, SINK_PATH, TIME_FORMATE, TOPIC_NAME, sparkRead}
+import uk.co.odinconsultants.sss.SSSUtils.{
+  BOOTSTRAP,
+  OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT,
+  SINK_PATH,
+  TIME_FORMATE,
+  TOPIC_NAME,
+  WATERMARK_SECONDS,
+  sparkRead,
+  sparkS3Session,
+}
 
 import java.nio.file.Files
 import java.text.SimpleDateFormat
@@ -41,7 +54,9 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
 
   def toEndpointName(x: String): String = x.substring(0, 12)
 
-  def ioLog(x: String): IO[Unit] = IO.println(s"PH ${new Date()}: $x")
+  def ioLog(x: String): IO[Unit] = IO.println(toMessage(x))
+
+  def toMessage(x: String) = s"PH ${new Date()}: $x"
 
   /** TODO
     * Pull images
@@ -89,19 +104,36 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     _              <- ioLog("About to send messages")
     _              <- sendMessages
     _              <- ioLog("About to read messages")
+    s3_endpoint     = s"http://$s3_node:9000/"
+    _              <- ioLog("About to start polling S3") *> pollS3(s3_endpoint).handleErrorWith(t =>
+                        ioLog("Could not start polling S3") *> IO(t.printStackTrace())
+                      )
     _              <-
-      (//(sparkReadIO(s"http://$s3_node:9000/") *> ioLog("Finished reading messages")).start *>
+      ( // (sparkReadIO(s3_endpoint) *> ioLog("Finished reading messages")).start *>
+
         IO.sleep(10.seconds) *>
-        (ioLog(
-          "About to send some more messages"
-        ) *>
-          sendMessages *> IO.sleep(10.seconds)).foreverM.start *>
-        ioLog("About to close down. Press return to end") *>
-        IO.readLine).handleErrorWith(t => IO(t.printStackTrace()))
+          (ioLog(
+            "About to send some more messages"
+          ) *>
+            sendMessages *> IO.sleep(10.seconds)).foreverM.start *>
+          ioLog("About to close down. Press return to end") *>
+          IO.readLine
+      ).handleErrorWith(t => IO(t.printStackTrace()))
     _              <- race(toInterpret(client))(
                         (List(spark, slave, minio) ++ kafkas).map(StopRequest.apply)
                       )
   } yield println("Started and stopped" + spark)
+
+  def pollS3(s3_endpoint: String): IO[Unit] = for {
+    _     <- ioLog("About to get Spark session")
+    spark <- IO(sparkS3Session(s3_endpoint, "query"))
+    _     <- ioLog("Have Spark session")
+    _     <- (ioLog("About to query...") *> IO {
+               val count = spark.read.parquet(SINK_PATH).count()
+               println(toMessage(s"Count = $count"))
+             }.handleErrorWith(t => ioLog(s"Could not query $SINK_PATH ${t.getMessage}") *> IO(t.printStackTrace())) *> ioLog("queried") *>
+               IO.sleep(WATERMARK_SECONDS.seconds)).foreverM.start
+  } yield {}
 
   def createLocalDnsMapping(additional: Map[String, String] = Map.empty[String, String]): Unit = {
     import scala.jdk.CollectionConverters.*
@@ -155,6 +187,6 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       .covary[IO]
   }
 
-  def sparkReadIO(endpoint: String): IO[(StreamingQuery, DataFrame)] = IO(sparkRead(endpoint))
+  def sparkReadIO(endpoint: String): IO[SparkSession] = IO(sparkRead(endpoint))
 
 }
