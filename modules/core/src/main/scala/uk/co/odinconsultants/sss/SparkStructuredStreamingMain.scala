@@ -1,6 +1,7 @@
 package uk.co.odinconsultants.sss
 
-import cats.effect.{Deferred, IO, IOApp, Resource}
+import cats.effect.kernel.Ref
+import cats.effect.{Deferred, IO, IOApp, Ref, Resource}
 import cats.free.Free
 import com.comcast.ip4s.*
 import com.github.dockerjava.api.DockerClient
@@ -11,11 +12,7 @@ import org.apache.spark.sql.functions.*
 import org.apache.spark.sql.streaming.StreamingQuery
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.burningwave.tools.net.{
-  DefaultHostResolver,
-  HostResolutionRequestInterceptor,
-  MappedHostResolver,
-}
+import org.burningwave.tools.net.{DefaultHostResolver, HostResolutionRequestInterceptor, MappedHostResolver}
 import uk.co.odinconsultants.MinioUtils
 import uk.co.odinconsultants.MinioUtils.*
 import uk.co.odinconsultants.SparkUtils.*
@@ -26,16 +23,7 @@ import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
 import uk.co.odinconsultants.dreadnought.docker.*
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, ioPrintln, verboseWaitFor}
 import uk.co.odinconsultants.kafka.KafkaUtils.startKafkas
-import uk.co.odinconsultants.sss.SSSUtils.{
-  BOOTSTRAP,
-  OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT,
-  SINK_PATH,
-  TIME_FORMATE,
-  TOPIC_NAME,
-  WATERMARK_SECONDS,
-  sparkRead,
-  sparkS3Session,
-}
+import uk.co.odinconsultants.sss.SSSUtils.{BOOTSTRAP, OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT, SINK_PATH, TIME_FORMATE, TOPIC_NAME, WATERMARK_SECONDS, sparkRead, sparkS3Session}
 
 import java.nio.file.Files
 import java.text.SimpleDateFormat
@@ -102,20 +90,20 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
                         )
                       }
     _              <- ioLog("About to send messages")
-    _              <- sendMessages
+    counter        <- Ref.of[IO, Int](0)
+    _              <- sendMessages(counter)
     _              <- ioLog("About to read messages")
     s3_endpoint     = s"http://$s3_node:9000/"
-    _              <- ioLog("About to start polling S3") *> pollS3(s3_endpoint).handleErrorWith(t =>
+    _              <- ioLog("About to start polling S3") *> pollS3(s3_endpoint, counter).handleErrorWith(t =>
                         ioLog("Could not start polling S3") *> IO(t.printStackTrace())
                       )
     _              <-
-      ( // (sparkReadIO(s3_endpoint) *> ioLog("Finished reading messages")).start *>
-
+      (  (sparkReadIO(s3_endpoint) *> ioLog("Finished reading messages")).start *>
         IO.sleep(10.seconds) *>
           (ioLog(
             "About to send some more messages"
           ) *>
-            sendMessages *> IO.sleep(10.seconds)).foreverM.start *>
+            sendMessages((counter)) *> IO.sleep(10.seconds)).foreverM.start *>
           ioLog("About to close down. Press return to end") *>
           IO.readLine
       ).handleErrorWith(t => IO(t.printStackTrace()))
@@ -124,14 +112,16 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
                       )
   } yield println("Started and stopped" + spark)
 
-  def pollS3(s3_endpoint: String): IO[Unit] = for {
+  def pollS3(s3_endpoint: String, counter: Ref[IO, Int]): IO[Unit] = for {
     _     <- ioLog("About to get Spark session")
     spark <- IO(sparkS3Session(s3_endpoint, "query"))
     _     <- ioLog("Have Spark session")
     _     <- (ioLog("About to query...") *> IO {
                val count = spark.read.parquet(SINK_PATH).count()
                println(toMessage(s"Count = $count"))
-             }.handleErrorWith(t => ioLog(s"Could not query $SINK_PATH ${t.getMessage}") *> IO(t.printStackTrace())) *> ioLog("queried") *>
+             }.handleErrorWith(t =>
+               ioLog(s"Could not query $SINK_PATH ${t.getMessage}") *> IO(t.printStackTrace())
+             ) *> ioLog("queried") *> counter.getAndUpdate(identity).flatMap { (count: Int) => ioLog(s"Number of messages sent = $count")} *>
                IO.sleep(WATERMARK_SECONDS.seconds)).foreverM.start
   } yield {}
 
@@ -143,7 +133,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     );
   }
 
-  private val sendMessages: IO[Unit] = {
+  def sendMessages(counter: Ref[IO, Int]): IO[Unit] = {
     val bootstrapServer                                        = s"localhost:${OUTSIDE_KAFKA_BOOTSTRAP_PORT}"
     val producerSettings: ProducerSettings[IO, String, String] =
       ProducerSettings[IO, String, String]
@@ -157,7 +147,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       )
       .flatMap { producer =>
         val messages: Stream[IO, ProducerResult[String, String]] =
-          produceWithoutOffsets(producer, TOPIC_NAME)
+          produceWithoutOffsets(producer, TOPIC_NAME, counter)
         messages
       }
       .handleErrorWith(x =>
@@ -170,9 +160,12 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
   private def produceWithoutOffsets(
       producer: TransactionalKafkaProducer.WithoutOffsets[IO, String, String],
       topic:    String,
+      counter: Ref[IO, Int],
   ): Stream[IO, ProducerResult[String, String]] =
     createPureMessages(topic).evalMap { case record =>
-      ioLog(s"buffering $record") *> producer.produceWithoutOffsets(record)
+      counter.update(_ + 1) *>
+//        ioLog(s"buffering $record") *>
+        producer.produceWithoutOffsets(record)
     }
 
   def createPureMessages(topic: String): Stream[IO, ProducerRecords[String, String]] = {
@@ -182,7 +175,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
 
     Stream
       .emits(List("a", "b", "c", "d").zipWithIndex)
-      .evalTap(x => ioLog(s"Creating message $x"))
+//      .evalTap(x => ioLog(s"Creating message $x"))
       .map((x, i) => ProducerRecords.one(ProducerRecord(topic, s"key_$x", df.format(new Date()))))
       .covary[IO]
   }

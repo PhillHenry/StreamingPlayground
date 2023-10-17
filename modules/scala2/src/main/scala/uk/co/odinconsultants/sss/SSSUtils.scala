@@ -23,7 +23,7 @@ object SSSUtils {
   val SINK_PATH                        = s"s3a://$BUCKET_NAME/test"
   val SPARK_DRIVER_PORT                = 10027 // you'll need to open your firewall to this port
   val SPARK_BLOCK_PORT                 = 10028 // and this. Actually, if you have 2 jos running, open 2 more monotonically rising
-  val WATERMARK_SECONDS                = 60
+  val WATERMARK_SECONDS                = 20
 
   def sparkRead(endpoint: String): SparkSession = {
     import org.apache.spark.sql.streaming.{OutputMode, Trigger}
