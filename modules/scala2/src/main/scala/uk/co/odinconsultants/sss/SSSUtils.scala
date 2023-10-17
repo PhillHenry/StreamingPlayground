@@ -34,18 +34,19 @@ object SSSUtils {
       .option("startingOffsets", "earliest")
       .load()
     df.printSchema()
-    val col_ts    = "ts"
+    val col_ts    = "timestamp"
     val partition = "partition"
     val query2    = df
       .select(
         col("key"),
-        current_timestamp().alias(col_ts),
+        col(col_ts),
+//        current_timestamp().alias(col_ts),
         col(partition),
       )
       .withWatermark(col_ts, "60 seconds")
       .groupBy(partition, col_ts)
       .agg(count("*"))
-      .withWatermark(col_ts, "60 seconds")
+//      .withWatermark(col_ts, "60 seconds")
       .writeStream
       .format("parquet")
       .outputMode(OutputMode.Append())
@@ -83,7 +84,7 @@ object SSSUtils {
   }
 
   def main(args: Array[String]): Unit = {
-    val container_id = "9d4fc21c9c0b"
+    val container_id = "8f9f8c0b3bf0"
     import scala.jdk.CollectionConverters._
     HostResolutionRequestInterceptor.INSTANCE.install(
       new MappedHostResolver(Map(container_id -> "127.0.0.1").asJava),
