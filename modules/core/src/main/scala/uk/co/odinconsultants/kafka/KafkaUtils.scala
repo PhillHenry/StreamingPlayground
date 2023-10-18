@@ -15,7 +15,9 @@ import scala.concurrent.duration.*
 
 object KafkaUtils {
 
-  def startKafkas(client: DockerClient, networkName: String): IO[List[ContainerId]] = for {
+  def startKafkas(client: DockerClient,
+                  networkName: String,
+                  partitions: Int = 2): IO[List[ContainerId]] = for {
     kafkaStart <- Deferred[IO, String]
     kafkaLatch  =
       verboseWaitFor(Some(s"${Console.BLUE}kafka1: "))("started (kafka.server.Kafka", kafkaStart)
@@ -31,7 +33,7 @@ object KafkaUtils {
       )
     _          <- kafkaStart.get.timeout(20.seconds)
     _          <- SparkStructuredStreamingMain.ioLog(s"About to create topic $TOPIC_NAME")
-    _          <- IO(createCustomTopic(TOPIC_NAME, OUTSIDE_KAFKA_BOOTSTRAP_PORT))
+    _          <- IO(createCustomTopic(TOPIC_NAME, OUTSIDE_KAFKA_BOOTSTRAP_PORT, partitions=partitions))
   } yield kafkas
 
 }

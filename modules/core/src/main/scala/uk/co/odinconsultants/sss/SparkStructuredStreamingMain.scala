@@ -23,7 +23,7 @@ import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
 import uk.co.odinconsultants.dreadnought.docker.*
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, ioPrintln, verboseWaitFor}
 import uk.co.odinconsultants.kafka.KafkaUtils.startKafkas
-import uk.co.odinconsultants.sss.SSSUtils.{BOOTSTRAP, OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT, SINK_PATH, TIME_FORMATE, TOPIC_NAME, WATERMARK_SECONDS, sparkRead, sparkS3Session}
+import uk.co.odinconsultants.sss.SSSUtils.{BOOTSTRAP, KEY, MAX_EXECUTORS, OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT, SINK_PATH, TIMESTAMP_COL, TIME_FORMATE, TOPIC_NAME, WATERMARK_SECONDS, sparkRead, sparkS3Session}
 
 import java.nio.file.Files
 import java.text.SimpleDateFormat
@@ -44,7 +44,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
 
   def ioLog(x: String): IO[Unit] = IO.println(toMessage(x))
 
-  def toMessage(x: String) = s"PH ${new Date()}: $x"
+  def toMessage(x: => String): String = s"PH ${new Date()}: $x"
 
   /** TODO
     * Pull images
@@ -58,7 +58,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     dir             = Files.createTempDirectory("PH").toString
     _              <- ioLog(s"directory = $dir")
     minio          <- startMinio(client, networkName, dir)
-    kafkas         <- startKafkas(client, networkName)
+    kafkas         <- startKafkas(client, networkName, MAX_EXECUTORS / 2)
     s3_node         = toEndpoint(minio)
     spark          <-
       waitForMaster(
@@ -98,15 +98,15 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
                         ioLog("Could not start polling S3") *> IO(t.printStackTrace())
                       )
     _              <-
-      (  (sparkReadIO(s3_endpoint) *> ioLog("Finished reading messages")).start *>
-        IO.sleep(10.seconds) *>
-          (ioLog(
-            "About to send some more messages"
-          ) *>
-            sendMessages((counter)) *> IO.sleep(10.seconds)).foreverM.start *>
-          ioLog("About to close down. Press return to end") *>
-          IO.readLine
-      ).handleErrorWith(t => IO(t.printStackTrace()))
+      ((sparkReadIO(s3_endpoint) *> ioLog("Finished reading messages")).start *>
+        IO.sleep((WATERMARK_SECONDS / 2).seconds) *>
+        (ioLog(
+          "About to send some more messages"
+        ) *>
+          sendMessages(counter) *> IO
+            .sleep((WATERMARK_SECONDS / 2).seconds)).replicateA_(5).start *>
+        ioLog("About to close down. Press return to end") *>
+        IO.readLine).handleErrorWith(t => IO(t.printStackTrace()))
     _              <- race(toInterpret(client))(
                         (List(spark, slave, minio) ++ kafkas).map(StopRequest.apply)
                       )
@@ -116,13 +116,20 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     _     <- ioLog("About to get Spark session")
     spark <- IO(sparkS3Session(s3_endpoint, "query"))
     _     <- ioLog("Have Spark session")
-    _     <- (ioLog("About to query...") *> IO {
+    _     <- (ioLog("About to query...") *> (IO {
                val count = spark.read.parquet(SINK_PATH).count()
                println(toMessage(s"Count = $count"))
-             }.handleErrorWith(t =>
+             } *> ioLog("queried") *> counter.getAndUpdate(identity).flatMap { (count: Int) =>
+               ioLog(s"Number of messages sent = $count")
+             } *>
+               IO {
+                 val latest = spark.read.parquet(SINK_PATH).agg(max(TIMESTAMP_COL))
+                 val ids = spark.read.parquet(SINK_PATH).select(KEY).collect().map(x => new String(x.getAs[Array[Byte]](0)).toInt).sorted
+                 println(toMessage(s"Most recent persisted timestamp: ${latest.collect()(0)}, ids = ${ids.mkString(", ")}"))
+               }).handleErrorWith(t =>
                ioLog(s"Could not query $SINK_PATH ${t.getMessage}") *> IO(t.printStackTrace())
-             ) *> ioLog("queried") *> counter.getAndUpdate(identity).flatMap { (count: Int) => ioLog(s"Number of messages sent = $count")} *>
-               IO.sleep(WATERMARK_SECONDS.seconds)).foreverM.start
+             ) *>
+               IO.sleep((WATERMARK_SECONDS / 2).seconds)).foreverM.start
   } yield {}
 
   def createLocalDnsMapping(additional: Map[String, String] = Map.empty[String, String]): Unit = {
@@ -160,24 +167,14 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
   private def produceWithoutOffsets(
       producer: TransactionalKafkaProducer.WithoutOffsets[IO, String, String],
       topic:    String,
-      counter: Ref[IO, Int],
-  ): Stream[IO, ProducerResult[String, String]] =
-    createPureMessages(topic).evalMap { case record =>
-      counter.update(_ + 1) *>
-//        ioLog(s"buffering $record") *>
-        producer.produceWithoutOffsets(record)
-    }
-
-  def createPureMessages(topic: String): Stream[IO, ProducerRecords[String, String]] = {
+      counter:  Ref[IO, Int],
+  ): Stream[IO, ProducerResult[String, String]] = {
     val tz = TimeZone.getTimeZone("UTC")
     val df = new SimpleDateFormat(TIME_FORMATE)
     df.setTimeZone(tz)
-
-    Stream
-      .emits(List("a", "b", "c", "d").zipWithIndex)
-//      .evalTap(x => ioLog(s"Creating message $x"))
-      .map((x, i) => ProducerRecords.one(ProducerRecord(topic, s"key_$x", df.format(new Date()))))
-      .covary[IO]
+    Stream.eval(counter.getAndUpdate(_ + 1)).evalMap { case i: Int =>
+        producer.produceWithoutOffsets(ProducerRecords.one(ProducerRecord(topic, s"$i", df.format(new Date()))))
+    }
   }
 
   def sparkReadIO(endpoint: String): IO[SparkSession] = IO(sparkRead(endpoint))
