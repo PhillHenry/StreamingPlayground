@@ -139,14 +139,11 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     _     <- ioLog("About to get Spark session")
     spark <- IO(sparkS3Session(s3_endpoint, "query"))
     _     <- ioLog("Have Spark session")
-    _     <- ((IO {
-               val count = spark.read.parquet(SINK_PATH).count()
-               println(toMessage(s"Persisted count = $count"))
-             } *> counter.getAndUpdate(identity).flatMap { (count: Int) =>
+    _     <- ((counter.getAndUpdate(identity).flatMap { (count: Int) =>
                ioLog(s"Number of messages sent = $count")
              } *>
                IO {
-                 val latest = spark.read.parquet(SINK_PATH).agg(max(TIMESTAMP_COL))
+                 val latest = spark.read.parquet(SINK_PATH).agg(max(TIMESTAMP_COL)).collect()
                  val ids    = spark.read
                    .parquet(SINK_PATH)
                    .select(KEY)
@@ -155,7 +152,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
                    .sorted
                  println(
                    toMessage(
-                     s"Most recent persisted timestamp: ${latest.collect()(0)}, ids = ${ids.mkString(", ")}"
+                     s"${ids.size} events written to S3. Most recent persisted timestamp: ${latest(0)}, ids = ${ids.mkString(", ")}"
                    )
                  )
                }).handleErrorWith(t =>
@@ -205,6 +202,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     val df = new SimpleDateFormat(TIME_FORMATE)
     df.setTimeZone(tz)
     Stream.eval(counter.getAndUpdate(_ + 1)).evalMap { case i: Int =>
+      ioLog(s"Sending message $i") *>
       producer.produceWithoutOffsets(
         ProducerRecords.one(ProducerRecord(topic, s"$i", df.format(new Date())))
       )
