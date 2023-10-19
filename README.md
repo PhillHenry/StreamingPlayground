@@ -2,7 +2,7 @@
 Experiments with various streaming technologies.
 
 The code in thie repo will create Spark, Kafka etc cluster within Docker all running on a single laptop.
-For this, it uses [Dreadnough](https://github.com/PhillHenry/dreadnought]).
+For this, it uses [Dreadnought](https://github.com/PhillHenry/dreadnought]).
 
 # Example
 `SparkStructuredStreamingMain` will start a Kafka cluster of 3 brokers using the KRaft protocol
