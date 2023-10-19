@@ -12,7 +12,11 @@ import org.apache.spark.sql.functions.*
 import org.apache.spark.sql.streaming.StreamingQuery
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.burningwave.tools.net.{DefaultHostResolver, HostResolutionRequestInterceptor, MappedHostResolver}
+import org.burningwave.tools.net.{
+  DefaultHostResolver,
+  HostResolutionRequestInterceptor,
+  MappedHostResolver,
+}
 import uk.co.odinconsultants.MinioUtils
 import uk.co.odinconsultants.MinioUtils.*
 import uk.co.odinconsultants.SparkUtils.*
@@ -23,7 +27,19 @@ import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
 import uk.co.odinconsultants.dreadnought.docker.*
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, ioPrintln, verboseWaitFor}
 import uk.co.odinconsultants.kafka.KafkaUtils.startKafkas
-import uk.co.odinconsultants.sss.SSSUtils.{BOOTSTRAP, KEY, MAX_EXECUTORS, OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT, SINK_PATH, TIMESTAMP_COL, TIME_FORMATE, TOPIC_NAME, WATERMARK_SECONDS, sparkRead, sparkS3Session}
+import uk.co.odinconsultants.sss.SSSUtils.{
+  BOOTSTRAP,
+  KEY,
+  MAX_EXECUTORS,
+  OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT,
+  SINK_PATH,
+  TIMESTAMP_COL,
+  TIME_FORMATE,
+  TOPIC_NAME,
+  WATERMARK_SECONDS,
+  sparkRead,
+  sparkS3Session,
+}
 
 import java.nio.file.Files
 import java.text.SimpleDateFormat
@@ -100,11 +116,7 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     _              <-
       ((sparkReadIO(s3_endpoint) *> ioLog("Finished reading messages")).start *>
         IO.sleep((WATERMARK_SECONDS / 2).seconds) *>
-        (ioLog(
-          "About to send some more messages"
-        ) *>
-          sendMessages(counter) *> IO
-            .sleep((WATERMARK_SECONDS / 2).seconds)).replicateA_(5).start *>
+        sendMessagesPauseThenSendMore(counter) *>
         ioLog("About to close down. Press return to end") *>
         IO.readLine).handleErrorWith(t => IO(t.printStackTrace()))
     _              <- race(toInterpret(client))(
@@ -112,20 +124,40 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
                       )
   } yield println("Started and stopped" + spark)
 
+  def sendMessagesPauseThenSendMore(counter: Ref[IO, Int]) = (ioLog("First batch") *>
+    sendMessageBatchs(5, counter) *>
+    IO.sleep((WATERMARK_SECONDS * 2).seconds) *>
+    ioLog("Second batch") *>
+    sendMessageBatchs(5, counter) *>
+    ioLog("Finished sending")).start
+
+  def sendMessageBatchs(batches: Int, counter: Ref[IO, Int]) = (
+    sendMessages(counter) *>
+    IO.sleep((WATERMARK_SECONDS / 2).seconds)).replicateA_(batches)
+
   def pollS3(s3_endpoint: String, counter: Ref[IO, Int]): IO[Unit] = for {
     _     <- ioLog("About to get Spark session")
     spark <- IO(sparkS3Session(s3_endpoint, "query"))
     _     <- ioLog("Have Spark session")
-    _     <- (ioLog("About to query...") *> (IO {
+    _     <- ((IO {
                val count = spark.read.parquet(SINK_PATH).count()
-               println(toMessage(s"Count = $count"))
-             } *> ioLog("queried") *> counter.getAndUpdate(identity).flatMap { (count: Int) =>
+               println(toMessage(s"Persisted count = $count"))
+             } *> counter.getAndUpdate(identity).flatMap { (count: Int) =>
                ioLog(s"Number of messages sent = $count")
              } *>
                IO {
                  val latest = spark.read.parquet(SINK_PATH).agg(max(TIMESTAMP_COL))
-                 val ids = spark.read.parquet(SINK_PATH).select(KEY).collect().map(x => new String(x.getAs[Array[Byte]](0)).toInt).sorted
-                 println(toMessage(s"Most recent persisted timestamp: ${latest.collect()(0)}, ids = ${ids.mkString(", ")}"))
+                 val ids    = spark.read
+                   .parquet(SINK_PATH)
+                   .select(KEY)
+                   .collect()
+                   .map(x => new String(x.getAs[Array[Byte]](0)).toInt)
+                   .sorted
+                 println(
+                   toMessage(
+                     s"Most recent persisted timestamp: ${latest.collect()(0)}, ids = ${ids.mkString(", ")}"
+                   )
+                 )
                }).handleErrorWith(t =>
                ioLog(s"Could not query $SINK_PATH ${t.getMessage}") *> IO(t.printStackTrace())
              ) *>
@@ -173,7 +205,9 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     val df = new SimpleDateFormat(TIME_FORMATE)
     df.setTimeZone(tz)
     Stream.eval(counter.getAndUpdate(_ + 1)).evalMap { case i: Int =>
-        producer.produceWithoutOffsets(ProducerRecords.one(ProducerRecord(topic, s"$i", df.format(new Date()))))
+      producer.produceWithoutOffsets(
+        ProducerRecords.one(ProducerRecord(topic, s"$i", df.format(new Date())))
+      )
     }
   }
 
