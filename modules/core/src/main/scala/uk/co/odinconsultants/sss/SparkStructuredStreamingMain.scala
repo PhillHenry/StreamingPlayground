@@ -131,31 +131,29 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     sendMessageBatchs(5, counter) *>
     ioLog("Finished sending")).start
 
-  def sendMessageBatchs(batches: Int, counter: Ref[IO, Int]) = (
-    sendMessages(counter) *>
+  def sendMessageBatchs(batches: Int, counter: Ref[IO, Int]) = (sendMessages(counter) *>
     IO.sleep((WATERMARK_SECONDS / 2).seconds)).replicateA_(batches)
 
   def pollS3(s3_endpoint: String, counter: Ref[IO, Int]): IO[Unit] = for {
     _     <- ioLog("About to get Spark session")
     spark <- IO(sparkS3Session(s3_endpoint, "query"))
     _     <- ioLog("Have Spark session")
-    _     <- ((counter.getAndUpdate(identity).flatMap { (count: Int) =>
-               ioLog(s"Number of messages sent = $count")
-             } *>
-               IO {
-                 val latest = spark.read.parquet(SINK_PATH).agg(max(TIMESTAMP_COL)).collect()
-                 val ids    = spark.read
-                   .parquet(SINK_PATH)
-                   .select(KEY)
-                   .collect()
-                   .map(x => new String(x.getAs[Array[Byte]](0)).toInt)
-                   .sorted
-                 println(
-                   toMessage(
-                     s"${ids.size} events written to S3. Most recent persisted timestamp: ${latest(0)}, ids = ${ids.mkString(", ")}"
-                   )
+    sent  <- counter.getAndUpdate(identity)
+    _     <- (IO {
+               val latest = spark.read.parquet(SINK_PATH).agg(max(TIMESTAMP_COL)).collect()
+               val ids    = spark.read
+                 .parquet(SINK_PATH)
+                 .select(KEY)
+                 .collect()
+                 .map(x => new String(x.getAs[Array[Byte]](0)).toInt)
+                 .sorted
+               println(
+                 toMessage(
+                   s"${ids.size}/$sent events written to S3. Most recent persisted timestamp: ${latest(0)}, ids = ${ids
+                       .mkString(", ")}"
                  )
-               }).handleErrorWith(t =>
+               )
+             }.handleErrorWith(t =>
                ioLog(s"Could not query $SINK_PATH ${t.getMessage}") *> IO(t.printStackTrace())
              ) *>
                IO.sleep((WATERMARK_SECONDS / 2).seconds)).foreverM.start
@@ -203,9 +201,9 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
     df.setTimeZone(tz)
     Stream.eval(counter.getAndUpdate(_ + 1)).evalMap { case i: Int =>
       ioLog(s"Sending message $i") *>
-      producer.produceWithoutOffsets(
-        ProducerRecords.one(ProducerRecord(topic, s"$i", df.format(new Date())))
-      )
+        producer.produceWithoutOffsets(
+          ProducerRecords.one(ProducerRecord(topic, s"$i", df.format(new Date())))
+        )
     }
   }
 

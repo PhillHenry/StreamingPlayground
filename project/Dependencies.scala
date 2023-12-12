@@ -35,9 +35,11 @@ object Dependencies {
     val ip4s        = "3.1.3"
     val dreadnought = "0.1.9"
 
-    val spark     = "3.3.0"
-    val hadoopAws = "3.3.1"
-    val minio     = "8.5.5"
+    val spark              = "3.3.0"
+    val hadoopAws          = "3.3.1"
+    val minio              = "8.5.5"
+    val documentationUtils = "0.13"
+    val scalaTest          = "3.2.9"
   }
 
   object Libraries {
@@ -124,6 +126,15 @@ object Dependencies {
       ("io.minio" % "minio" % V.minio).exclude("com.fasterxml.jackson.core", "jackson-databind")
     val burningWave = "org.burningwave" % "tools" % "0.25.8"
 
+    val documentationUtilsScalaTest =
+      ("uk.co.odinconsultants.documentation_utils" %% "scalatest_utils" % V.documentationUtils)
+        .cross(CrossVersion.for3Use2_13)
+    val documentationUtilsSpark =
+      "uk.co.odinconsultants.documentation_utils" % "spark" % V.documentationUtils
+    val documentationUtilsCore =
+      "uk.co.odinconsultants.documentation_utils" % "core" % V.documentationUtils
+
+    val scalaTest = ("org.scalatest" %% "scalatest" % "3.3.0-SNAP4").exclude("org.scala-lang.modules", "scala-xml_3")
   }
 
 }

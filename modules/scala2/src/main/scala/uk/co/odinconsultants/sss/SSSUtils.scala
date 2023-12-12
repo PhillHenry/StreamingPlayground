@@ -60,7 +60,7 @@ object SSSUtils {
       .agg(count("*"))
       .writeStream
       .format("parquet")
-      .outputMode(OutputMode.Append())
+      .outputMode(OutputMode.Append()) // Update produces nothing when the groupBy is unique
       .option("truncate", "false")
       .option("path", SINK_PATH)
       .option("checkpointLocation", SINK_PATH + "checkpoint")
