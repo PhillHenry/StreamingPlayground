@@ -1,7 +1,7 @@
 package uk.co.odinconsultants.sss
 
 import cats.effect.kernel.Ref
-import cats.effect.{Deferred, IO, IOApp, Ref, Resource}
+import cats.effect.*
 import cats.free.Free
 import com.comcast.ip4s.*
 import com.github.dockerjava.api.DockerClient
@@ -12,34 +12,19 @@ import org.apache.spark.sql.functions.*
 import org.apache.spark.sql.streaming.StreamingQuery
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.burningwave.tools.net.{
-  DefaultHostResolver,
-  HostResolutionRequestInterceptor,
-  MappedHostResolver,
-}
+import org.burningwave.tools.net.{DefaultHostResolver, HostResolutionRequestInterceptor, MappedHostResolver}
+import uk.co.odinconsultants.LoggingUtils.{ioLog, toMessage}
 import uk.co.odinconsultants.MinioUtils
 import uk.co.odinconsultants.MinioUtils.*
 import uk.co.odinconsultants.SparkUtils.*
 import uk.co.odinconsultants.dreadnought.Flow.race
+import uk.co.odinconsultants.dreadnought.docker.*
 import uk.co.odinconsultants.dreadnought.docker.Algebra.toInterpret
 import uk.co.odinconsultants.dreadnought.docker.CatsDocker.{createNetwork, interpret, removeNetwork}
 import uk.co.odinconsultants.dreadnought.docker.KafkaAntics.createCustomTopic
-import uk.co.odinconsultants.dreadnought.docker.*
 import uk.co.odinconsultants.dreadnought.docker.Logging.{LoggingLatch, ioPrintln, verboseWaitFor}
-import uk.co.odinconsultants.kafka.KafkaUtils.startKafkas
-import uk.co.odinconsultants.sss.SSSUtils.{
-  BOOTSTRAP,
-  KEY,
-  MAX_EXECUTORS,
-  OUTSIDE_KAFKA_BOOTSTRAP_PORT_INT,
-  SINK_PATH,
-  TIMESTAMP_COL,
-  TIME_FORMATE,
-  TOPIC_NAME,
-  WATERMARK_SECONDS,
-  sparkRead,
-  sparkS3Session,
-}
+import uk.co.odinconsultants.kafka.KafkaUtils.{sendMessages, startKafkas}
+import uk.co.odinconsultants.sss.SSSUtils.*
 
 import java.nio.file.Files
 import java.text.SimpleDateFormat
@@ -57,10 +42,6 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
   def toEndpoint(x: ContainerId): String = toEndpointName(x.toString)
 
   def toEndpointName(x: String): String = x.substring(0, 12)
-
-  def ioLog(x: String): IO[Unit] = IO.println(toMessage(x))
-
-  def toMessage(x: => String): String = s"PH ${new Date()}: $x"
 
   /** TODO
     * Pull images
@@ -165,46 +146,6 @@ object SparkStructuredStreamingMain extends IOApp.Simple {
       new MappedHostResolver((Map(ENDPOINT_S3 -> "127.0.0.1") ++ additional).asJava),
       DefaultHostResolver.INSTANCE,
     );
-  }
-
-  def sendMessages(counter: Ref[IO, Int]): IO[Unit] = {
-    val bootstrapServer                                        = s"localhost:${OUTSIDE_KAFKA_BOOTSTRAP_PORT}"
-    val producerSettings: ProducerSettings[IO, String, String] =
-      ProducerSettings[IO, String, String]
-        .withBootstrapServers(bootstrapServer)
-    TransactionalKafkaProducer
-      .stream(
-        TransactionalProducerSettings(
-          s"transactionId${System.currentTimeMillis()}",
-          producerSettings.withRetries(10),
-        )
-      )
-      .flatMap { producer =>
-        val messages: Stream[IO, ProducerResult[String, String]] =
-          produceWithoutOffsets(producer, TOPIC_NAME, counter)
-        messages
-      }
-      .handleErrorWith(x =>
-        Stream.eval(ioLog("Failed to send messages") *> IO(x.printStackTrace()))
-      )
-      .compile
-      .drain
-  }
-
-  private def produceWithoutOffsets(
-      producer: TransactionalKafkaProducer.WithoutOffsets[IO, String, String],
-      topic:    String,
-      counter:  Ref[IO, Int],
-  ): Stream[IO, ProducerResult[String, String]] = {
-    val tz = TimeZone.getTimeZone("UTC")
-    val df = new SimpleDateFormat(TIME_FORMATE)
-    df.setTimeZone(tz)
-    Stream.eval(counter.getAndUpdate(_ + 1)).evalMap { case i: Int =>
-      ioLog(s"Sending message $i") *>
-        producer.produceWithoutOffsets(
-          ProducerRecords.one(ProducerRecord(topic, s"$i", df.format(new Date())))
-        )
-    }
   }
 
   def sparkReadIO(endpoint: String): IO[SparkSession] = IO(sparkRead(endpoint))

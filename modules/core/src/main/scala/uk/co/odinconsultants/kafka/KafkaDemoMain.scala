@@ -16,7 +16,8 @@ import uk.co.odinconsultants.dreadnought.docker.PopularContainers.startKafkaOnPo
 import uk.co.odinconsultants.dreadnought.docker.SparkStructuredStreamingMain.{startSlave, startSparkCluster, waitForMaster}
 import uk.co.odinconsultants.dreadnought.docker.ZKKafkaMain.{kafkaEcosystem, startKafkaCluster}
 import uk.co.odinconsultants.sss.SSSUtils.TOPIC_NAME
-import uk.co.odinconsultants.sss.SparkStructuredStreamingMain.{OUTSIDE_KAFKA_BOOTSTRAP_PORT, ioLog, networkName}
+import uk.co.odinconsultants.LoggingUtils.{ioLog, toMessage}
+import uk.co.odinconsultants.sss.SparkStructuredStreamingMain.{OUTSIDE_KAFKA_BOOTSTRAP_PORT, networkName}
 
 import java.util.UUID
 import scala.concurrent.duration.*

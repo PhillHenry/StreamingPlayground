@@ -1,4 +1,5 @@
 package uk.co.odinconsultants.sss
+import cats.effect.kernel.Ref
 import cats.effect.unsafe.implicits.global
 import cats.effect.{Deferred, IO}
 import org.scalatest.GivenWhenThen
@@ -8,9 +9,10 @@ import uk.co.odinconsultants.dreadnought.Flow.race
 import uk.co.odinconsultants.dreadnought.docker.Algebra.toInterpret
 import uk.co.odinconsultants.dreadnought.docker.CatsDocker.{createNetwork, removeNetwork}
 import uk.co.odinconsultants.dreadnought.docker.{CatsDocker, StopRequest}
-import uk.co.odinconsultants.kafka.KafkaUtils.{LoggerFactory, Loggers, startKafkasAndWait}
+import uk.co.odinconsultants.kafka.KafkaUtils.{LoggerFactory, Loggers, startKafkasAndWait, sendMessages}
 import uk.co.odinconsultants.sss.SSSUtils.MAX_EXECUTORS
-import uk.co.odinconsultants.sss.SparkStructuredStreamingMain.{ioLog, networkName}
+import uk.co.odinconsultants.sss.SparkStructuredStreamingMain.{networkName}
+import uk.co.odinconsultants.LoggingUtils.ioLog
 
 import scala.concurrent.duration.*
 
@@ -54,6 +56,8 @@ class KafkaSmokeSpec extends SpecPretifier with GivenWhenThen {
         leader    <- latch.get
         leaderName = leader.substring(0, leader.indexOf(":"))
         _         <- IO { When(s"node '$leaderName' is elected leader") }
+        counter   <- Ref.of[IO, Int](0)
+        _         <- sendMessages(counter)
         _         <- race(toInterpret(client))(
                        kafkas.map(StopRequest.apply)
                      )
