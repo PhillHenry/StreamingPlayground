@@ -15,25 +15,46 @@ import scala.concurrent.duration.*
 
 object KafkaUtils {
 
-  def startKafkas(client: DockerClient,
-                  networkName: String,
-                  partitions: Int = 2): IO[List[ContainerId]] = for {
-    kafkaStart <- Deferred[IO, String]
-    kafkaLatch  =
+  type Loggers = List[String => IO[Unit]]
+  type LoggerFactory = Deferred[IO, String] => Loggers
+
+  def createLoggers(kafkaStart: Deferred[IO, String]): List[
+    String => IO[Unit]
+  ] = {
+    val kafkaLatch =
       verboseWaitFor(Some(s"${Console.BLUE}kafka1: "))("started (kafka.server.Kafka", kafkaStart)
-    loggers     = List(
-                    kafkaLatch,
-                    ioPrintln(Some(s"${Console.GREEN}kafka2: ")),
-                    ioPrintln(Some(s"${Console.YELLOW}kafka3: ")),
-                  )
-    kafkas     <-
+    List(
+      kafkaLatch,
+      ioPrintln(Some(s"${Console.GREEN}kafka2: ")),
+      ioPrintln(Some(s"${Console.YELLOW}kafka3: ")),
+    )
+  }
+
+  def startKafkas(
+      client:      DockerClient,
+      networkName: String,
+      partitions:  Int = 2,
+  ): IO[List[ContainerId]] = for {
+    kafkaStart <- Deferred[IO, String]
+    loggers     = createLoggers(kafkaStart)
+    ids        <- startKafkasAndWait(client, networkName, partitions, loggers, kafkaStart)
+  } yield ids
+
+  def startKafkasAndWait(
+      client:      DockerClient,
+      networkName: String,
+      partitions:  Int,
+      loggers:     Loggers,
+      kafkaStart:  Deferred[IO, String],
+  ): IO[List[ContainerId]] = for {
+    kafkas <-
       interpret(
         client,
         KafkaRaft.startKafkas(loggers, networkName),
       )
-    _          <- kafkaStart.get.timeout(20.seconds)
-    _          <- SparkStructuredStreamingMain.ioLog(s"About to create topic $TOPIC_NAME")
-    _          <- IO(createCustomTopic(TOPIC_NAME, OUTSIDE_KAFKA_BOOTSTRAP_PORT, partitions=partitions))
+    _      <- kafkaStart.get.timeout(20.seconds)
+    _      <- SparkStructuredStreamingMain.ioLog(s"About to create topic $TOPIC_NAME")
+    _      <- IO(createCustomTopic(TOPIC_NAME, OUTSIDE_KAFKA_BOOTSTRAP_PORT, partitions = partitions))
   } yield kafkas
 
 }

@@ -39,7 +39,7 @@ val commonDependencies = Seq(
   Libraries.logBack,
   Libraries.minio,
   Libraries.burningWave,
-//  Libraries.documentationUtilsScalaTest,
+  Libraries.documentationUtilsScalaTest,
   Libraries.scalaTest,
 ) ++ sparkAndKafka
 
