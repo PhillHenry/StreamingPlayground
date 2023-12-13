@@ -1,7 +1,9 @@
 package uk.co.odinconsultants.sss
 import cats.effect.kernel.Ref
+import cats.effect.std.CountDownLatch
 import cats.effect.unsafe.implicits.global
 import cats.effect.{Deferred, IO}
+import fs2.kafka.{AutoOffsetReset, ConsumerSettings}
 import org.scalatest.GivenWhenThen
 import org.scalatest.wordspec.AnyWordSpec
 import uk.co.odinconsultants.documentation_utils.SpecPretifier
@@ -9,9 +11,16 @@ import uk.co.odinconsultants.dreadnought.Flow.race
 import uk.co.odinconsultants.dreadnought.docker.Algebra.toInterpret
 import uk.co.odinconsultants.dreadnought.docker.CatsDocker.{createNetwork, removeNetwork}
 import uk.co.odinconsultants.dreadnought.docker.{CatsDocker, StopRequest}
-import uk.co.odinconsultants.kafka.KafkaUtils.{LoggerFactory, Loggers, startKafkasAndWait, sendMessages}
-import uk.co.odinconsultants.sss.SSSUtils.MAX_EXECUTORS
-import uk.co.odinconsultants.sss.SparkStructuredStreamingMain.{networkName}
+import uk.co.odinconsultants.kafka.KafkaUtils.{
+  LoggerFactory,
+  Loggers,
+  bootstrapServer,
+  consume,
+  sendMessages,
+  startKafkasAndWait,
+}
+import uk.co.odinconsultants.sss.SSSUtils.{MAX_EXECUTORS, TOPIC_NAME}
+import uk.co.odinconsultants.sss.SparkStructuredStreamingMain.networkName
 import uk.co.odinconsultants.LoggingUtils.ioLog
 
 import scala.concurrent.duration.*
@@ -55,12 +64,26 @@ class KafkaSmokeSpec extends SpecPretifier with GivenWhenThen {
         kafkas    <- startKafkasAndWait(client, networkName, NUM_PARTITIONS, loggerLatch(latch), latch)
         leader    <- latch.get
         leaderName = leader.substring(0, leader.indexOf(":"))
-        _         <- IO { When(s"node '$leaderName' is elected leader") }
-        counter   <- Ref.of[IO, Int](0)
-        _         <- sendMessages(counter)
-        _         <- race(toInterpret(client))(
-                       kafkas.map(StopRequest.apply)
-                     )
+        _         <- IO(When(s"node '$leaderName' is elected leader"))
+
+        numMessages = 100
+        _          <- IO(s"and we send $numMessages")
+        _          <- ioLog("About to send messages...") *> sendMessages(numMessages)
+        latch      <- CountDownLatch[IO](numMessages)
+        _          <- ioLog("About to read messages...") *> consume(
+                        ConsumerSettings[IO, String, String]
+                          .withAutoOffsetReset(AutoOffsetReset.Earliest)
+                          .withBootstrapServers(bootstrapServer)
+                          .withGroupId("group_PH"),
+                        TOPIC_NAME,
+                        latch,
+                      ).compile.drain.start
+        _          <- IO(Then(s"$numMessages are received"))
+        _          <- latch.await
+
+        _ <- race(toInterpret(client))(
+               kafkas.map(StopRequest.apply)
+             )
       } yield println(s"PH: Leader line: ${leader}")
       io.unsafeRunSync()
     }

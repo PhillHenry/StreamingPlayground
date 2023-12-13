@@ -13,6 +13,7 @@ import uk.co.odinconsultants.sss.SparkStructuredStreamingMain.OUTSIDE_KAFKA_BOOT
 import fs2.Stream
 import fs2.kafka.*
 import cats.effect.kernel.Ref
+import cats.effect.std.CountDownLatch
 import uk.co.odinconsultants.LoggingUtils.ioLog
 
 import java.util.{Date, TimeZone}
@@ -21,8 +22,10 @@ import scala.concurrent.duration.*
 
 object KafkaUtils {
 
-  type Loggers = List[String => IO[Unit]]
+  type Loggers       = List[String => IO[Unit]]
   type LoggerFactory = Deferred[IO, String] => Loggers
+
+  val bootstrapServer = s"localhost:${OUTSIDE_KAFKA_BOOTSTRAP_PORT}"
 
   def createLoggers(kafkaStart: Deferred[IO, String]): List[
     String => IO[Unit]
@@ -64,7 +67,6 @@ object KafkaUtils {
   } yield kafkas
 
   def sendMessages(counter: Ref[IO, Int]): IO[Unit] = {
-    val bootstrapServer                                        = s"localhost:${OUTSIDE_KAFKA_BOOTSTRAP_PORT}"
     val producerSettings: ProducerSettings[IO, String, String] =
       ProducerSettings[IO, String, String]
         .withBootstrapServers(bootstrapServer)
@@ -87,6 +89,32 @@ object KafkaUtils {
       .drain
   }
 
+  def sendMessages(numMessages: Int): IO[Unit] = {
+    val producerSettings: ProducerSettings[IO, String, String] =
+      ProducerSettings[IO, String, String]
+        .withBootstrapServers(bootstrapServer)
+    transactionalProducerStream(producerSettings, TOPIC_NAME, numMessages)
+      .handleErrorWith((x: Throwable) => Stream.eval(IO(x.printStackTrace())))
+      .compile
+      .drain
+  }
+
+  private def transactionalProducerStream(
+      producerSettings: ProducerSettings[IO, String, String],
+      topic:            String,
+      numMessages:      Int,
+  ): Stream[IO, ProducerResult[String, String]] =
+    TransactionalKafkaProducer
+      .stream(
+        TransactionalProducerSettings(
+          s"transactionId${System.currentTimeMillis()}",
+          producerSettings.withRetries(1),
+        )
+      )
+      .flatMap { producer =>
+        sendEachMessageInItsOwnTX(producer, topic, numMessages)
+      }
+
   private def produceWithoutOffsets(
       producer: TransactionalKafkaProducer.WithoutOffsets[IO, String, String],
       topic:    String,
@@ -102,4 +130,51 @@ object KafkaUtils {
         )
     }
   }
+
+  private def sendEachMessageInItsOwnTX(
+      producer:    TransactionalKafkaProducer[IO, String, String],
+      topic:       String,
+      numMessages: Int,
+  ): Stream[IO, ProducerResult[String, String]] =
+    eachMessageInItsOwnTX(topic, numMessages)
+      .evalMap { case record =>
+        ioLog(s"About to produce $record") *> producer.produce(record)
+      }
+
+  def eachMessageInItsOwnTX(
+      topic:       String,
+      numMessages: Int,
+  ): Stream[IO, TransactionalProducerRecords[IO, String, String]] =
+    Stream
+      .emits((0 to numMessages - 1).zipWithIndex)
+      .map { case (k, v) =>
+        TransactionalProducerRecords.one(
+          CommittableProducerRecords.one(
+            ProducerRecord(topic, s"key_$k", s"val_$v"),
+            CommittableOffset[IO](
+              new org.apache.kafka.common.TopicPartition(topic, 1),
+              new org.apache.kafka.clients.consumer.OffsetAndMetadata(1),
+              Some("group"),
+              x => IO.println(s"offset/partition = $x"),
+            ),
+          )
+        )
+      }
+      .covary[IO]
+
+  def consume(
+      consumerSettings: ConsumerSettings[IO, String, String],
+      topic:            String,
+      latch:            CountDownLatch[IO],
+  ): Stream[IO, CommittableConsumerRecord[IO, String, String]] =
+    KafkaConsumer
+      .stream(consumerSettings)
+      .subscribeTo(topic)
+      .records
+      .evalMap { (committable: CommittableConsumerRecord[IO, String, String]) =>
+        val record: ConsumerRecord[String, String] = committable.record
+        ioLog(
+          s"Consumed ${record.key} -> ${record.value}, offset = ${record.offset}, partition = ${record.partition}"
+        ) *> latch.release *> IO(committable)
+      }
 }
