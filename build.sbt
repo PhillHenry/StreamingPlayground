@@ -72,13 +72,39 @@ lazy val scala2 = (project in file("modules/scala2"))
 
 // integration tests
 lazy val it = (project in file("modules/it"))
-  .settings(commonSettings: _*)
   .dependsOn(core)
   .settings(
-    libraryDependencies ++= List(
-      "ch.qos.logback" % "logback-classic" % "1.2.11" % Test
-    ) ++ dreadnoughtDependencies ++ commonDependencies
+    parallelExecution := false,
+    commonSettings ++ List(
+      libraryDependencies := List(
+        "ch.qos.logback" % "logback-classic" % "1.2.11" % Test
+      ) ++ dreadnoughtDependencies ++ commonDependencies,
+      testOptions         := Seq(
+        Tests.Argument(TestFrameworks.ScalaTest, "-fW", "mdocs/scenarios.txt")
+      ),
+    )
   )
+
+val bddDocs = taskKey[Unit]("Turn the BDD output into HTML")
+
+val header = s"""## Streaming Playground
+                |
+                |These are BDD (Behaviour Driven Design) tests that both test
+                |the code and generate human readable documentation.
+                |The code for these tests can be found in [GitHub](https://github.com/PhillHenry/StreamingPlayground/)
+                |
+                |""".stripMargin
+val args   =
+  " uk.co.odinconsultants.documentation_utils.SplitScenariosMain \"" + header + "\" mdocs/scenarios.txt"
+
+bddDocs := Def.taskDyn {
+  val appName = name.value
+  Def.task {
+    (runMain in core in Compile)
+      .toTask(args)
+      .value
+  }
+}.value
 
 lazy val docs = project
   .in(file("docs"))

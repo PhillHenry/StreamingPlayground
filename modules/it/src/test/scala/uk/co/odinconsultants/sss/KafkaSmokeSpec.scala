@@ -55,7 +55,7 @@ class KafkaSmokeSpec extends SpecPretifier with GivenWhenThen {
     "broker messages" in {
       val io = for {
         latch     <- Deferred[IO, String]
-        _         <- IO(Given(s"a Kafka cluster with $NUM_BROKERS brokers and $NUM_PARTITIONS partitions"))
+        _         <- IO(Given(s"a Kafka cluster with $NUM_BROKERS brokers and $NUM_PARTITIONS partitions running the RAFT protocol"))
         client    <- CatsDocker.client
         _         <- removeNetwork(client, networkName).handleErrorWith(x =>
                        ioLog(s"Did not delete network $networkName.\n${x.getMessage}")
@@ -67,10 +67,9 @@ class KafkaSmokeSpec extends SpecPretifier with GivenWhenThen {
         _         <- IO(When(s"node '$leaderName' is elected leader"))
 
         numMessages = 100
-        _          <- IO(s"and we send $numMessages")
-        _          <- ioLog("About to send messages...") *> sendMessages(numMessages)
+        _          <- IO(And(s"and we send $numMessages messages")) *> sendMessages(numMessages)
         latch      <- CountDownLatch[IO](numMessages)
-        _          <- ioLog("About to read messages...") *> consume(
+        _          <- IO(Then(s"$numMessages messages are received")) *> consume(
                         ConsumerSettings[IO, String, String]
                           .withAutoOffsetReset(AutoOffsetReset.Earliest)
                           .withBootstrapServers(bootstrapServer)
@@ -78,8 +77,7 @@ class KafkaSmokeSpec extends SpecPretifier with GivenWhenThen {
                         TOPIC_NAME,
                         latch,
                       ).compile.drain.start
-        _          <- IO(Then(s"$numMessages are received"))
-        _          <- latch.await
+        _          <- latch.await.timeout(2.minutes)
 
         _ <- race(toInterpret(client))(
                kafkas.map(StopRequest.apply)
