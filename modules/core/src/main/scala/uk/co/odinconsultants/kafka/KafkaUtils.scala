@@ -61,7 +61,7 @@ object KafkaUtils {
         client,
         KafkaRaft.startKafkas(loggers, networkName),
       )
-    _      <- kafkaStart.get.timeout(20.seconds)
+    _      <- kafkaStart.get.timeout(60.seconds)
     _      <- ioLog(s"About to create topic $TOPIC_NAME")
     _      <- IO(createCustomTopic(TOPIC_NAME, OUTSIDE_KAFKA_BOOTSTRAP_PORT, partitions = partitions))
   } yield kafkas
