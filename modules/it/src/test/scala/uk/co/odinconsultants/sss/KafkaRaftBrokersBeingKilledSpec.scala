@@ -14,9 +14,17 @@ import uk.co.odinconsultants.dreadnought.Flow.{process, race}
 import uk.co.odinconsultants.dreadnought.docker.Algebra.toInterpret
 import uk.co.odinconsultants.dreadnought.docker.CatsDocker.{createNetwork, removeNetwork}
 import uk.co.odinconsultants.dreadnought.docker.{CatsDocker, StopRequest}
-import uk.co.odinconsultants.kafka.KafkaUtils.{LoggerFactory, consume, startKafkasAndWait, transactionalProducerStream}
+import uk.co.odinconsultants.kafka.KafkaUtils.{
+  LoggerFactory,
+  consume,
+  startKafkasAndWait,
+  transactionalProducerStream,
+}
 import uk.co.odinconsultants.sss.SSSUtils.{MAX_EXECUTORS, TIME_FORMATE, TOPIC_NAME}
-import uk.co.odinconsultants.sss.SparkStructuredStreamingMain.{OUTSIDE_KAFKA_BOOTSTRAP_PORT, networkName}
+import uk.co.odinconsultants.sss.SparkStructuredStreamingMain.{
+  OUTSIDE_KAFKA_BOOTSTRAP_PORT,
+  networkName,
+}
 import fs2.kafka.*
 import fs2.Stream
 
@@ -52,7 +60,7 @@ class KafkaRaftBrokersBeingKilledSpec extends SpecPretifier with GivenWhenThen {
   }
 
   "A kafka cluster" should {
-    "broker messages" in {
+    "survive the leader dying" in {
       val bootstrapServers: String =
         (0 until NUM_BROKERS)
           .map(i => s"localhost:${i + OUTSIDE_KAFKA_BOOTSTRAP_PORT.value}")
@@ -62,11 +70,17 @@ class KafkaRaftBrokersBeingKilledSpec extends SpecPretifier with GivenWhenThen {
         val producerSettings: ProducerSettings[IO, String, String] =
           ProducerSettings[IO, String, String]
             .withBootstrapServers(bootstrapServers)
-        ioLog(s"About to send $numMessages to $bootstrapServers") *> (KafkaProducer.stream(producerSettings).flatMap { producer =>
-          Stream.eval {
-              producer.produceOne(TOPIC_NAME, "key", "value")
-            }.repeatN(numMessages)
-        }.compile.drain)
+        ioLog(s"About to send $numMessages to $bootstrapServers") *> (KafkaProducer
+          .stream(producerSettings)
+          .flatMap { producer =>
+            Stream
+              .eval {
+                producer.produceOne(TOPIC_NAME, "key", "value")
+              }
+              .repeatN(numMessages)
+          }
+          .compile
+          .drain)
       }
 
       val io = for {
@@ -89,22 +103,24 @@ class KafkaRaftBrokersBeingKilledSpec extends SpecPretifier with GivenWhenThen {
         _         <-
           IO(
             When(
-              s"node '$leaderName' is elected leader from the cluster of brokers, {${kafkas.mkString(", ")}"
+              s"node '$leaderName' is elected leader from the cluster of brokers, {${BROKER_NAMES.mkString(", ")}}"
             )
           )
 
         numMessages = 100
         _          <- IO(And(s"we send $numMessages messages")) *> sendMessages(numMessages)
 
-        leaderIds = kafkas.zip(BROKER_NAMES).filter(_._2.startsWith(leaderName)).map(_._1)
-        _        <- IO(And(s"we then kill the leader with ID '${leaderIds.mkString(",")}'"))
-        _        <- toInterpret(client)(Free.liftF(StopRequest(leaderIds.head)))
+        leaderIds = kafkas.zip(BROKER_NAMES).filter(_._2.startsWith(leaderName))
+        _        <- IO(And(s"we then kill the leader with ID '${leaderIds.map(_._2).mkString(",")}'"))
+        _        <- toInterpret(client)(Free.liftF(StopRequest(leaderIds.map(_._1).head)))
 
         _ <- IO(And(s"we send $numMessages more messages")) *> sendMessages(numMessages)
 
         latch <- CountDownLatch[IO](numMessages)
 
-        _ <- IO(Then(s"$numMessages messages are received")) *> consume(
+        _ <- IO(Then(s"$numMessages messages are received")) *> ioLog(
+               "About to consume messages"
+             ) *> consume(
                ConsumerSettings[IO, String, String]
                  .withAutoOffsetReset(AutoOffsetReset.Earliest)
                  .withBootstrapServers(bootstrapServers)
@@ -115,7 +131,7 @@ class KafkaRaftBrokersBeingKilledSpec extends SpecPretifier with GivenWhenThen {
         _ <- latch.await.timeout(2.minutes)
 
         _ <- race(toInterpret(client))(
-               kafkas.filter(x => !leaderIds.contains(x)).map(StopRequest.apply)
+               kafkas.filter(x => !leaderIds.map(_._1).contains(x)).map(StopRequest.apply)
              )
       } yield println(s"PH: Leader line: ${leader}")
       io.unsafeRunSync()
