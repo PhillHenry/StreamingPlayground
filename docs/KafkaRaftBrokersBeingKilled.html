@@ -49,16 +49,16 @@ b.BWHI {background-color: #aaaaaa}
 <pre>Run starting. Expected test count is: 0
 KafkaRaftBrokersBeingKilledSpec:
 A kafka cluster
-- should broker messages
+- should survive the leader dying
   + Given a Kafka cluster with 4 brokers and 2 partitions running the RAFT protocol 
-  + When node 'kafka1' is elected leader from the cluster of brokers, {814f0a802fd551e24ad5defbc7c101a4e9352cf082e7a9aa047742595257fc05, a80198e3ccec4ffae313acc9b78b850b792a0c8166127db2962a10dafd5a186b, 0f399da3664e02a50d03f772785b0115fee6f484dbd02355d2848f0805e5a221, 909657dcbdf0a2c42029e976266fe7137135b4c6b0ed2bccd1f9f25443421e47 
+  + When node 'kafka1' is elected leader from the cluster of brokers, {kafka1, kafka2, kafka3, kafka4} 
   + And we send 100 messages 
-  + And we then kill the leader with ID '814f0a802fd551e24ad5defbc7c101a4e9352cf082e7a9aa047742595257fc05' 
+  + And we then kill the leader with ID 'kafka1' 
   + And we send 100 more messages 
   + Then 100 messages are received 
 + <b class=MAG>+ </b><b class=YEL>+ </b><b class=WHI>+ </b><b class=CYN>+ </b><b class=BLU>+ </b><b class=RED>+ </b><b class=GRN>+ </b><b class=MAG>+ </b><b class=YEL>+ </b><b class=WHI>+ </b><b class=CYN>+ </b><b class=BLU>+ </b><b class=RED>+ </b><b class=GRN>+ </b><b class=MAG>+ </b><b class=YEL>+ </b><b class=WHI>+ </b><b class=CYN>+ </b><b class=BLU>+ </b><b class=RED>+ </b><b class=GRN>+ </b><b class=MAG>+ </b><b class=YEL>+ </b><b class=WHI>+ </b><b class=CYN>+ </b><b class=BLU>+ </b><b class=RED>+ </b><b class=GRN>+ </b><b class=MAG>+ </b><b class=YEL>+ </b><b class=WHI>+ </b><b class=CYN>+ </b><b class=BLU>+ </b><b class=RED>+ </b><b class=GRN>+ </b><b class=MAG>+ </b><b class=YEL>+ </b><b class=WHI>+ </b><b class=CYN>+ </b><b class=BLU>+ </b><b class=RED>+ </b><b class=GRN>+ </b><b class=MAG>+ </b><b class=YEL>+ </b><b class=WHI>+ </b><b class=CYN>+ </b><b class=BLU>+ </b><b class=RED>+ </b><b class=GRN>+ </b><b class=MAG>+ </b><b class=YEL>+ </b> 
 + <b class=MAG>+ </b><b class=YEL>+ </b><b class=WHI>+ </b><b class=CYN>+ </b><b class=BLU>+ </b><b class=RED>+ </b><b class=GRN>+ </b><b class=MAG>+ </b><b class=YEL>+ </b><b class=WHI>+ </b><b class=CYN>+ </b><b class=BLU>+ </b><b class=RED>+ </b><b class=GRN>+ </b><b class=MAG>+ </b><b class=YEL>+ </b><b class=WHI>+ </b><b class=CYN>+ </b><b class=BLU>+ </b><b class=RED>+ </b><b class=GRN>+ </b><b class=MAG>+ </b><b class=YEL>+ </b><b class=WHI>+ </b><b class=CYN>+ </b><b class=BLU>+ </b><b class=RED>+ </b><b class=GRN>+ </b><b class=MAG>+ </b><b class=YEL>+ </b><b class=WHI>+ </b><b class=CYN>+ </b><b class=BLU>+ </b><b class=RED>+ </b><b class=GRN>+ </b><b class=MAG>+ </b><b class=YEL>+ </b><b class=WHI>+ </b><b class=CYN>+ </b><b class=BLU>+ </b><b class=RED>+ </b><b class=GRN>+ </b><b class=MAG>+ </b><b class=YEL>+ </b><b class=WHI>+ </b><b class=CYN>+ </b><b class=BLU>+ </b><b class=RED>+ </b><b class=GRN>+ </b><b class=MAG>+ </b><b class=YEL>+ </b> 
-Run completed in 35 seconds, 119 milliseconds.
+Run completed in 34 seconds, 847 milliseconds.
 Total number of tests run: 1
 Suites: completed 1, aborted 0
 Tests: succeeded 1, failed 0, canceled 0, ignored 0, pending 0
