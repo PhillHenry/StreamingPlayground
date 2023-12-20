@@ -14,13 +14,16 @@ import uk.co.odinconsultants.dreadnought.Flow.{process, race}
 import uk.co.odinconsultants.dreadnought.docker.Algebra.toInterpret
 import uk.co.odinconsultants.dreadnought.docker.CatsDocker.{createNetwork, removeNetwork}
 import uk.co.odinconsultants.dreadnought.docker.{CatsDocker, StopRequest}
-import uk.co.odinconsultants.kafka.KafkaUtils.*
-import uk.co.odinconsultants.sss.SSSUtils.{MAX_EXECUTORS, TOPIC_NAME}
+import uk.co.odinconsultants.kafka.KafkaUtils.{LoggerFactory, consume, startKafkasAndWait, transactionalProducerStream}
+import uk.co.odinconsultants.sss.SSSUtils.{MAX_EXECUTORS, TIME_FORMATE, TOPIC_NAME}
 import uk.co.odinconsultants.sss.SparkStructuredStreamingMain.{OUTSIDE_KAFKA_BOOTSTRAP_PORT, networkName}
+import fs2.kafka.*
+import fs2.Stream
 
+import java.text.SimpleDateFormat
 import scala.concurrent.duration.*
 
-class KafkaSmokeSpec extends SpecPretifier with GivenWhenThen {
+class KafkaRaftBrokersBeingKilledSpec extends SpecPretifier with GivenWhenThen {
 
   val NUM_BROKERS    = 4
   val NUM_PARTITIONS = 2
@@ -50,6 +53,22 @@ class KafkaSmokeSpec extends SpecPretifier with GivenWhenThen {
 
   "A kafka cluster" should {
     "broker messages" in {
+      val bootstrapServers: String =
+        (0 until NUM_BROKERS)
+          .map(i => s"localhost:${i + OUTSIDE_KAFKA_BOOTSTRAP_PORT.value}")
+          .mkString(",")
+
+      def sendMessages(numMessages: Int): IO[Unit] = {
+        val producerSettings: ProducerSettings[IO, String, String] =
+          ProducerSettings[IO, String, String]
+            .withBootstrapServers(bootstrapServers)
+        ioLog(s"About to send $numMessages to $bootstrapServers") *> (KafkaProducer.stream(producerSettings).flatMap { producer =>
+          Stream.eval {
+              producer.produceOne(TOPIC_NAME, "key", "value")
+            }.repeatN(numMessages)
+        }.compile.drain)
+      }
+
       val io = for {
         latch     <- Deferred[IO, String]
         loggers    = loggerLatch(latch)
@@ -81,16 +100,19 @@ class KafkaSmokeSpec extends SpecPretifier with GivenWhenThen {
         _        <- IO(And(s"we then kill the leader with ID '${leaderIds.mkString(",")}'"))
         _        <- toInterpret(client)(Free.liftF(StopRequest(leaderIds.head)))
 
+        _ <- IO(And(s"we send $numMessages more messages")) *> sendMessages(numMessages)
+
         latch <- CountDownLatch[IO](numMessages)
-        _     <- IO(Then(s"$numMessages messages are received")) *> consume(
-                   ConsumerSettings[IO, String, String]
-                     .withAutoOffsetReset(AutoOffsetReset.Earliest)
-                     .withBootstrapServers((0 until NUM_PARTITIONS).map(i => s"localhost:${i + OUTSIDE_KAFKA_BOOTSTRAP_PORT.value}").mkString(","))
-                     .withGroupId("group_PH"),
-                   TOPIC_NAME,
-                   latch,
-                 ).compile.drain.start
-        _     <- latch.await.timeout(2.minutes)
+
+        _ <- IO(Then(s"$numMessages messages are received")) *> consume(
+               ConsumerSettings[IO, String, String]
+                 .withAutoOffsetReset(AutoOffsetReset.Earliest)
+                 .withBootstrapServers(bootstrapServers)
+                 .withGroupId("group_PH"),
+               TOPIC_NAME,
+               latch,
+             ).compile.drain.start
+        _ <- latch.await.timeout(2.minutes)
 
         _ <- race(toInterpret(client))(
                kafkas.filter(x => !leaderIds.contains(x)).map(StopRequest.apply)

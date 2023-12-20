@@ -99,7 +99,7 @@ object KafkaUtils {
       .drain
   }
 
-  private def transactionalProducerStream(
+  def transactionalProducerStream(
       producerSettings: ProducerSettings[IO, String, String],
       topic:            String,
       numMessages:      Int,
@@ -115,7 +115,7 @@ object KafkaUtils {
         sendEachMessageInItsOwnTX(producer, topic, numMessages)
       }
 
-  private def produceWithoutOffsets(
+  def produceWithoutOffsets(
       producer: TransactionalKafkaProducer.WithoutOffsets[IO, String, String],
       topic:    String,
       counter:  Ref[IO, Int],
